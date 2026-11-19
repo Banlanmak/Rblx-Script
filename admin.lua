@@ -1,7 +1,7 @@
 -- ============================================================
 -- 🌐 GITHUB AUTO-UPDATER + DAHİLİ YEDEK (V18.1 Nova Edition)
 -- ============================================================
-local GITHUB_RAW_URL = "https://raw.githubusercontent.com/KULLANICI_ADIN/REPO_ADIN/main/admin.lua"
+local GITHUB_RAW_URL = "https://raw.githubusercontent.com/Banlanmak/Rblx-Script/refs/heads/main/admin.lua"
 local USE_GITHUB_UPDATER = true
 
 local HttpService = game:GetService("HttpService")
