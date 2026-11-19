@@ -1,5 +1,5 @@
 -- ============================================================
--- 🌐 GITHUB AUTO-UPDATER + DAHİLİ YEDEK (V18.1 Nova Edition)
+-- 🌐 GITHUB AUTO-UPDATER + DAHİLİ YEDEK (V18.2 Nova Edition)
 -- ============================================================
 local GITHUB_RAW_URL = "https://raw.githubusercontent.com/Banlanmak/Rblx-Script/refs/heads/main/admin.lua"
 local USE_GITHUB_UPDATER = true
@@ -43,15 +43,16 @@ local function tryLoadFromGitHub(isManualReload)
 		return false
 	end
 
-	-- Manuel güncellemede eski sürümü temizlemeden önce yeni sürümün hata vermediğinden emin ol
 	local prevCleanup = _G.AdminSystemCleanup
 	if isManualReload then
 		_G.__AdminForceReload = true
 	end
 
 	_G.__AdminLoadingFromGitHub = true
+	_G.__AdminPendingSource = "🌐 GitHub"
 	local execOk, execErr = pcall(compiledFn)
 	_G.__AdminLoadingFromGitHub = false
+	_G.__AdminPendingSource = nil
 
 	if not execOk or _G.AdminSystemActive ~= true then
 		warn("[ADMIN LOADER] GitHub kodu çalışırken arıza verdi: " .. tostring(execErr))
@@ -66,15 +67,16 @@ local function tryLoadFromGitHub(isManualReload)
 	return true
 end
 
--- Sunucu açılışında önce GitHub'ı dene; başarısız olursa aşağıdaki dahili V18.1 kodu çalışır
+-- Sunucu açılışında önce GitHub'ı dene; başarısız olursa aşağıdaki dahili V18.2 kodu çalışır
 if tryLoadFromGitHub(false) then
 	return
 end
 
 -- ============================================================
--- ⚡ DAHİLİ YEDEK SİSTEM: ULTRA GELİŞMİŞ ADMIN SİSTEMİ V18.1 (Nova Edition)
+-- ⚡ DAHİLİ YEDEK SİSTEM: ULTRA GELİŞMİŞ ADMIN SİSTEMİ V18.2 (Nova Edition)
 -- ============================================================
-local SCRIPT_VERSION = 29
+local SCRIPT_VERSION = 30
+local LOAD_SOURCE = _G.__AdminPendingSource or "💾 Dahili Yedek"
 
 -- ============================================================
 -- 🔒 VERSION GUARD: Sadece EN YÜKSEK sürüm çalışır
@@ -110,6 +112,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 local VirtualUser = game:GetService("VirtualUser")
+local StatsService = game:GetService("Stats")
 
 local FlyStates = {}
 local LoopStates = {}
@@ -172,7 +175,7 @@ local PLACE_ID = game.PlaceId
 local GAME_LINK = "https://www.roblox.com/games/" .. tostring(PLACE_ID)
 local ICON_URL = "https://www.roblox.com/asset-thumbnail/image?assetId=" .. tostring(PLACE_ID) .. "&width=256&height=256&format=png"
 local MAX_PLAYERS = Players.MaxPlayers
-local BUILD_VERSION = "v18.1.0-NovaEdition"
+local BUILD_VERSION = "v18.2.0-NovaEdition"
 local ServerLocked = false
 
 local THEME = {
@@ -208,6 +211,49 @@ local function ensureGameNameLoaded()
 	gameNameLoaded = true
 	return cachedGameName
 end
+
+--------------------------------------------------
+-- 📊 SUNUCU İSTATİSTİKLERİ, FPS & CANLI LOG AKIŞI
+--------------------------------------------------
+local ServerStats = {
+	totalJoins = 0,
+	peakPlayers = #Players:GetPlayers(),
+	sessionKicks = 0,
+	sessionBans = 0,
+	serverFPS = 60,
+	lastLockedBy = nil,
+	lastLockedAt = nil,
+}
+
+local ActivityLogs = {}
+local MAX_ACTIVITY_LOGS = 25
+
+local function addActivityLog(icon, text, color)
+	table.insert(ActivityLogs, 1, {
+		time = os.date("%H:%M:%S"),
+		icon = icon or "•",
+		text = text,
+		color = color or THEME.TextSecondary
+	})
+	if #ActivityLogs > MAX_ACTIVITY_LOGS then
+		table.remove(ActivityLogs)
+	end
+end
+
+addActivityLog("⚡", "Sistem başlatıldı (" .. BUILD_VERSION .. " • " .. LOAD_SOURCE .. ")", THEME.Accent)
+
+-- Sunucu FPS Ölçer
+local fpsFrameCount = 0
+local fpsElapsed = 0
+trackConnection(RunService.Heartbeat:Connect(function(dt)
+	fpsFrameCount += 1
+	fpsElapsed += dt
+	if fpsElapsed >= 1 then
+		ServerStats.serverFPS = math.clamp(math.floor((fpsFrameCount / fpsElapsed) + 0.5), 1, 60)
+		fpsFrameCount = 0
+		fpsElapsed = 0
+	end
+end))
 
 --------------------------------------------------
 -- 📛 KULLANICI ADI ÖNBELLEĞİ (Online + Offline)
@@ -327,7 +373,7 @@ local function setPlayerRole(targetUserId, newRole)
 end
 
 --------------------------------------------------
--- 🚫 BAN SİSTEMİ
+-- 🚫 GELİŞMİŞ BAN SİSTEMİ (Kim, Ne Zaman, Kim Banladı)
 --------------------------------------------------
 local BanDataStore = (function()
 	local ok, ds = pcall(function() return DataStoreService:GetDataStore("AdminSystem_BANS_v3") end)
@@ -339,7 +385,12 @@ local ServerBans = {}
 task.spawn(function()
 	if not BanDataStore then return end
 	local ok, data = pcall(function() return BanDataStore:GetAsync("GlobalBannedUsers") end)
-	if ok and type(data) == "table" then GlobalBans = data end
+	if ok and type(data) == "table" then
+		GlobalBans = data
+		for uidStr in pairs(GlobalBans) do
+			getUsernameAsync(tonumber(uidStr))
+		end
+	end
 end)
 
 local function saveGlobalBans()
@@ -348,8 +399,34 @@ local function saveGlobalBans()
 	end
 end
 
+local function formatRemainingBanTime(expireTimestamp)
+	if not expireTimestamp or expireTimestamp == 0 then
+		return "Kalıcı"
+	end
+	local rem = expireTimestamp - os.time()
+	if rem <= 0 then
+		return "Süresi Doldu"
+	end
+	local days = math.floor(rem / 86400)
+	local hours = math.floor((rem % 86400) / 3600)
+	local mins = math.floor((rem % 3600) / 60)
+	if days > 0 then
+		return string.format("%d gün %d sa", days, hours)
+	elseif hours > 0 then
+		return string.format("%d sa %d dk", hours, mins)
+	else
+		return string.format("%d dk", math.max(1, mins))
+	end
+end
+
 local function checkBanStatus(userId)
-	if ServerBans[userId] then return true, ServerBans[userId] end
+	local srvBan = ServerBans[userId]
+	if srvBan then
+		if type(srvBan) == "table" then
+			return true, srvBan.reason or "Bu sunucudan yasaklandınız."
+		end
+		return true, tostring(srvBan)
+	end
 	local banData = GlobalBans[tostring(userId)]
 	if banData then
 		if banData.expire == 0 or banData.expire > os.time() then
@@ -362,14 +439,38 @@ local function checkBanStatus(userId)
 	return false, nil
 end
 
-local function banUserGlobal(userId, reason, durationSeconds)
+local function banUserServer(userId, reason, bannedByPlayer, targetName)
+	local adminName = bannedByPlayer and bannedByPlayer.Name or "Sistem"
+	local tName = targetName or UsernameCache[userId] or ("ID: " .. tostring(userId))
+	ServerBans[userId] = {
+		reason = reason or "Kurallara Uymamak",
+		date = os.date("%d/%m/%Y %H:%M"),
+		timestamp = os.time(),
+		bannedBy = adminName,
+		bannedById = bannedByPlayer and bannedByPlayer.UserId or 0,
+		targetName = tName
+	}
+	ServerStats.sessionBans += 1
+	addActivityLog("⛔", adminName .. " → " .. tName .. " (Sunucu Ban: " .. (reason or "?") .. ")", THEME.Danger)
+end
+
+local function banUserGlobal(userId, reason, durationSeconds, bannedByPlayer, targetName)
 	local expireTime = (durationSeconds == 0) and 0 or (os.time() + durationSeconds)
+	local adminName = bannedByPlayer and bannedByPlayer.Name or "Sistem"
+	local tName = targetName or UsernameCache[userId] or nil
 	GlobalBans[tostring(userId)] = {
-		reason = reason,
+		reason = reason or "Kurallara Uymamak",
 		expire = expireTime,
-		date = os.date("%d/%m/%Y")
+		date = os.date("%d/%m/%Y %H:%M"),
+		timestamp = os.time(),
+		bannedBy = adminName,
+		bannedById = bannedByPlayer and bannedByPlayer.UserId or 0,
+		targetName = tName
 	}
 	saveGlobalBans()
+	ServerStats.sessionBans += 1
+	local durText = (durationSeconds == 0) and "Kalıcı" or formatRemainingBanTime(expireTime)
+	addActivityLog("💥", adminName .. " → " .. (tName or tostring(userId)) .. " (" .. durText .. " Ban)", THEME.Danger)
 end
 
 --------------------------------------------------
@@ -447,7 +548,7 @@ local function updateServerStatusLog(playerCount)
 					{ name = "⏱️ Süre", value = formatUptime(), inline = true },
 					{ name = "👑 Aktif Yetkililer", value = getAdminList(), inline = false }
 				},
-				footer = { text = "Nova Admin V18.1 • Sunucu Durumu" },
+				footer = { text = "Nova Admin V18.2 • Sunucu Durumu" },
 				timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
 			}}
 		}
@@ -489,7 +590,7 @@ local function sendAdminJoinLog(adminPlayer)
 					{ name = "👥 Oyuncular", value = tostring(count) .. " / " .. tostring(MAX_PLAYERS), inline = true },
 					{ name = "🆔 Oyun ID", value = "`" .. tostring(PLACE_ID) .. "`", inline = true }
 				},
-				footer = { text = "Nova Admin V18.1" },
+				footer = { text = "Nova Admin V18.2" },
 				timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
 			}}
 		}
@@ -507,7 +608,7 @@ local function getAdminState(player)
 	if not AdminStates[player.UserId] then
 		AdminStates[player.UserId] = {
 			selectedReason = "Kurallara Uymamak",
-			selectedTab = "⚡ Kontrol",
+			selectedTab = "📊 Durum",
 			menuOpen = false,
 			minimized = false,
 			selectedPlayerName = nil,
@@ -572,8 +673,9 @@ local function showNotification(player, text, color)
 	end)
 end
 
-local function showBlackoutAnnouncement(messageText)
+local function showBlackoutAnnouncement(messageText, senderName)
 	if not messageText or messageText == "" then return end
+	addActivityLog("📢", (senderName or "Admin") .. " duyuru yaptı: \"" .. messageText:sub(1, 36) .. "\"", THEME.Gold)
 	for _, p in ipairs(Players:GetPlayers()) do
 		task.spawn(function()
 			local pg = p:FindFirstChild("PlayerGui")
@@ -970,14 +1072,12 @@ local function findPlayerByPartial(name)
 	local query = string.lower(name)
 	local qLen = #query
 
-	-- 1. Tam eşleşme (Kullanıcı Adı veya Görünen Ad)
 	for _, p in ipairs(Players:GetPlayers()) do
 		if string.lower(p.Name) == query or string.lower(p.DisplayName) == query then
 			return p
 		end
 	end
 
-	-- 2. Başlangıç harfleri eşleşmesi (ilk 3 harf vb.)
 	for _, p in ipairs(Players:GetPlayers()) do
 		local pName = string.lower(p.Name)
 		local pDisp = string.lower(p.DisplayName)
@@ -986,14 +1086,12 @@ local function findPlayerByPartial(name)
 		end
 	end
 
-	-- 3. İsmin herhangi bir yerinde geçen eşleşme
 	for _, p in ipairs(Players:GetPlayers()) do
 		if string.lower(p.Name):find(query, 1, true) or string.lower(p.DisplayName):find(query, 1, true) then
 			return p
 		end
 	end
 
-	-- 4. Doğrudan UserId yazıldıysa
 	local numId = tonumber(name)
 	if numId then
 		local byId = Players:GetPlayerByUserId(numId)
@@ -1089,7 +1187,7 @@ local function getDynamicLoopTargets(player, nameArg, myRole, fixedTargets)
 end
 
 --------------------------------------------------
--- ⚔️ KOMUT MOTORU (Tüm Komutlarda all / others / ilk 3 harf / offline ban)
+-- ⚔️ KOMUT MOTORU
 --------------------------------------------------
 local function stopLoop(player)
 	local key = player.UserId
@@ -1117,7 +1215,15 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		end)
 		return true
 
-	-- AKILLI BAN (Online kısmi eşleşme öncelikli + Offline tam isim/ID banı + all/others)
+	-- SUNUCU DURUMU SEKMESİNİ AÇ
+	elseif cmd == "durum" or cmd == "status" or cmd == "serverstatus" then
+		local state = getAdminState(player)
+		state.selectedTab = "📊 Durum"
+		state.menuOpen = true
+		if _G.__adminOpenMenu then _G.__adminOpenMenu(player) end
+		return true
+
+	-- AKILLI BAN (Online kısmi + Offline tam isim/ID + all/others)
 	elseif cmd == "ban" then
 		local targetArg = args[1]
 		if not targetArg or targetArg == "" then
@@ -1126,14 +1232,12 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		end
 		local reason = rawRest:match("^%S+%s+(.+)$") or getAdminState(player).selectedReason
 
-		-- 1) Grup kısayolları (all / others / me)
 		if isMeKeyword(targetArg) or isAllKeyword(targetArg) or isOthersKeyword(targetArg) then
 			local targets = resolveTargets(player, targetArg, myRole)
 			local bannedCount = 0
 			for _, t in ipairs(targets) do
-				-- "all" kullanıldığında adminin yanlışlıkla kendini kalıcı banlamasını önle
 				if not (isAllKeyword(targetArg) and t == player) then
-					banUserGlobal(t.UserId, reason, 0)
+					banUserGlobal(t.UserId, reason, 0, player, t.Name)
 					t:Kick(reason)
 					bannedCount += 1
 				end
@@ -1144,20 +1248,18 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			return true
 		end
 
-		-- 2) Önce sunucudaki oyuncularda ara (ör: "sigma" yazılınca sunucuda "sigmaboy" varsa onu yakalar)
 		local onlineTarget = findPlayerByPartial(targetArg)
 		if onlineTarget then
 			if not canAffect(player, onlineTarget, myRole) then
 				showNotification(player, "Kurucuya işlem yapamazsın!", THEME.Danger)
 				return true
 			end
-			banUserGlobal(onlineTarget.UserId, reason, 0)
+			banUserGlobal(onlineTarget.UserId, reason, 0, player, onlineTarget.Name)
 			onlineTarget:Kick(reason)
 			showNotification(player, "🚫 " .. onlineTarget.Name .. " KALICI BANLANDI!", THEME.Danger)
 			return true
 		end
 
-		-- 3) Sunucuda eşleşen yoksa Roblox'tan çevrimdışı (offline) kullanıcıyı bul ve banla
 		showNotification(player, "🔍 '" .. targetArg .. "' sunucuda yok, çevrimdışı aranıyor...", THEME.Warning)
 		task.spawn(function()
 			local targetUserId = tonumber(targetArg)
@@ -1190,7 +1292,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 				UsernameCache[targetUserId] = fetchedName
 			end
 
-			banUserGlobal(targetUserId, reason, 0)
+			banUserGlobal(targetUserId, reason, 0, player, resolvedName)
 			local maybeOnline = Players:GetPlayerByUserId(targetUserId)
 			if maybeOnline then
 				maybeOnline:Kick(reason)
@@ -1207,6 +1309,8 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			if not (isAllKeyword(args[1]) and t == player) then
 				t:Kick(reason)
 				kickedCount += 1
+				ServerStats.sessionKicks += 1
+				addActivityLog("⚠️", player.Name .. " → " .. t.Name .. " kicklendi", THEME.Warning)
 			end
 		end
 		if kickedCount > 0 then showNotification(player, kickedCount .. " oyuncu kicklendi!", THEME.Warning) end
@@ -1219,23 +1323,42 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			return true
 		end
 		local found = false
+		local unbannedLabel = targetName
+		local numId = tonumber(targetName)
+
+		if numId and ServerBans[numId] then
+			ServerBans[numId] = nil
+			found = true
+		end
+
 		if GlobalBans[targetName] then
+			unbannedLabel = GlobalBans[targetName].targetName or targetName
 			GlobalBans[targetName] = nil
 			found = true
-			showNotification(player, "ID " .. targetName .. " banı kaldırıldı!", THEME.Success)
 		else
-			for userIdStr in pairs(GlobalBans) do
-				local ok, name = pcall(function() return Players:GetNameFromUserIdAsync(tonumber(userIdStr)) end)
-				if ok and name and string.lower(name):find(string.lower(targetName), 1, true) then
+			for userIdStr, bData in pairs(GlobalBans) do
+				local name = bData.targetName or UsernameCache[tonumber(userIdStr)]
+				if not name then
+					local ok, fetched = pcall(function() return Players:GetNameFromUserIdAsync(tonumber(userIdStr)) end)
+					if ok and fetched then name = fetched end
+				end
+				if name and string.lower(name):find(string.lower(targetName), 1, true) then
+					unbannedLabel = name
 					GlobalBans[userIdStr] = nil
+					ServerBans[tonumber(userIdStr)] = nil
 					found = true
-					showNotification(player, name .. " banı kaldırıldı!", THEME.Success)
 					break
 				end
 			end
 		end
-		if found then saveGlobalBans()
-		else showNotification(player, "Banlı kullanıcı bulunamadı!", THEME.Warning) end
+
+		if found then
+			saveGlobalBans()
+			addActivityLog("✅", player.Name .. " → " .. unbannedLabel .. " banını kaldırdı", THEME.Success)
+			showNotification(player, unbannedLabel .. " banı kaldırıldı!", THEME.Success)
+		else
+			showNotification(player, "Banlı kullanıcı bulunamadı!", THEME.Warning)
+		end
 		return true
 
 	-- DUYURU (3 saniye simsiyah ekran + beyaz yazı)
@@ -1244,7 +1367,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			showNotification(player, "Kullanım: /duyuru <mesaj>", THEME.Warning)
 			return true
 		end
-		showBlackoutAnnouncement(rawRest)
+		showBlackoutAnnouncement(rawRest, player.Name)
 		return true
 
 	-- KONTROL, JAIL & KÖRLÜK
@@ -1270,7 +1393,10 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 
 	elseif cmd == "jail" then
 		local targets = resolveTargets(player, args[1], myRole)
-		for _, t in ipairs(targets) do jailPlayer(t) end
+		for _, t in ipairs(targets) do
+			jailPlayer(t)
+			addActivityLog("🔒", player.Name .. " → " .. t.Name .. " hapse atıldı", THEME.Purple)
+		end
 		if #targets > 0 then showNotification(player, "Hapse atıldı (" .. #targets .. ")", THEME.Purple) end
 		return true
 
@@ -1578,7 +1704,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		if #targets > 0 then showNotification(player, "Oturtuldu (" .. #targets .. ")!", THEME.Warning) end
 		return true
 
-	-- LOOP KOMUTLARI (all / others / tekil destekli)
+	-- LOOP KOMUTLARI
 	elseif cmd == "loopkill" then
 		local targetArg = args[1]
 		local targets = resolveTargets(player, targetArg, myRole)
@@ -1653,11 +1779,15 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 
 	elseif cmd == "slock" then
 		ServerLocked = true
+		ServerStats.lastLockedBy = player.Name
+		ServerStats.lastLockedAt = os.date("%H:%M:%S")
+		addActivityLog("🔒", player.Name .. " sunucuyu kilitledi (SLock)", THEME.Danger)
 		showNotification(player, "🔒 Sunucu kilitlendi!", THEME.Danger)
 		return true
 
 	elseif cmd == "unslock" then
 		ServerLocked = false
+		addActivityLog("🔓", player.Name .. " sunucu kilidini açtı", THEME.Success)
 		showNotification(player, "🔓 Sunucu kilidi açıldı!", THEME.Success)
 		return true
 
@@ -1668,6 +1798,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 				if v.Parent then v:Destroy() count += 1 end
 			end
 		end
+		addActivityLog("🧹", player.Name .. " " .. count .. " eşya temizledi", THEME.Success)
 		showNotification(player, count .. " eşya temizlendi!", THEME.Success)
 		return true
 
@@ -1725,7 +1856,7 @@ local function onPlayerChatted(player, message)
 			showNotification(player, "Duyuru iptal edildi.", THEME.TextSecondary)
 			return
 		end
-		showBlackoutAnnouncement(message)
+		showBlackoutAnnouncement(message, player.Name)
 		return
 	end
 
@@ -1808,7 +1939,7 @@ createGeminiPanel = function(player)
 	Title.Size = UDim2.new(1, -60, 1, 0)
 	Title.Position = UDim2.new(0, 16, 0, 0)
 	Title.BackgroundTransparency = 1
-	Title.Text = "✨ GEMİNİ PANELİ  •  V18.1"
+	Title.Text = "✨ GEMİNİ PANELİ  •  V18.2"
 	Title.TextColor3 = THEME.Accent
 	Title.Font = Enum.Font.GothamBlack
 	Title.TextSize = 14
@@ -2145,7 +2276,7 @@ end
 _G.__adminCreateAuths = createOfflineAuthsGUI
 
 --------------------------------------------------
--- 🚫 BAN LİSTESİ PENCERESİ
+-- 🚫 DETAYLI BAN LİSTESİ PENCERESİ (Kim, Ne Zaman, Kim Banladı)
 --------------------------------------------------
 local createBanListGUI
 createBanListGUI = function(player)
@@ -2162,8 +2293,8 @@ createBanListGUI = function(player)
 	ScreenGui.Parent = playerGui
 
 	local MainFrame = Instance.new("Frame")
-	MainFrame.Size = UDim2.new(0, 490, 0, 450)
-	MainFrame.Position = UDim2.new(0.5, -245, 0.5, -225)
+	MainFrame.Size = UDim2.new(0, 520, 0, 470)
+	MainFrame.Position = UDim2.new(0.5, -260, 0.5, -235)
 	MainFrame.BackgroundColor3 = THEME.Bg0
 	MainFrame.Parent = ScreenGui
 	Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 14)
@@ -2180,7 +2311,7 @@ createBanListGUI = function(player)
 	Title.Size = UDim2.new(1, -60, 1, 0)
 	Title.Position = UDim2.new(0, 16, 0, 0)
 	Title.BackgroundTransparency = 1
-	Title.Text = "🚫 YASAKLI KULLANICILAR"
+	Title.Text = "🚫 YASAKLI KULLANICILAR (DETAYLI)"
 	Title.TextColor3 = THEME.Danger
 	Title.Font = Enum.Font.GothamBlack
 	Title.TextSize = 14
@@ -2198,7 +2329,7 @@ createBanListGUI = function(player)
 	Scroll.Parent = MainFrame
 	Instance.new("UICorner", Scroll).CornerRadius = UDim.new(0, 10)
 	local UIList = Instance.new("UIListLayout", Scroll)
-	UIList.Padding = UDim.new(0, 6)
+	UIList.Padding = UDim.new(0, 7)
 	local Pad = Instance.new("UIPadding", Scroll)
 	Pad.PaddingTop = UDim.new(0, 8)
 	Pad.PaddingLeft = UDim.new(0, 8)
@@ -2207,33 +2338,71 @@ createBanListGUI = function(player)
 	local count = 0
 	for userIdStr, data in pairs(GlobalBans) do
 		count += 1
+		local uid = tonumber(userIdStr)
 		local Item = Instance.new("Frame")
-		Item.Size = UDim2.new(1, -4, 0, 52)
+		Item.Size = UDim2.new(1, -4, 0, 68)
 		Item.BackgroundColor3 = THEME.Bg2
 		Item.Parent = Scroll
 		Instance.new("UICorner", Item).CornerRadius = UDim.new(0, 8)
-		Instance.new("UIStroke", Item).Color = Color3.fromRGB(160, 45, 55)
+		Instance.new("UIStroke", Item).Color = Color3.fromRGB(165, 45, 58)
 
-		local Lbl = Instance.new("TextLabel")
-		Lbl.Size = UDim2.new(0.7, -10, 1, 0)
-		Lbl.Position = UDim2.new(0, 12, 0, 0)
-		Lbl.BackgroundTransparency = 1
-		Lbl.Text = "👤 Yükleniyor... (ID: " .. userIdStr .. ")\n📌 " .. (data.reason or "?")
-		Lbl.TextColor3 = THEME.TextPrimary
-		Lbl.Font = Enum.Font.GothamBold
-		Lbl.TextSize = 11
-		Lbl.TextXAlignment = Enum.TextXAlignment.Left
-		Lbl.Parent = Item
+		local Av = Instance.new("ImageLabel")
+		Av.Size = UDim2.new(0, 38, 0, 38)
+		Av.Position = UDim2.new(0, 8, 0.5, -19)
+		Av.BackgroundColor3 = THEME.Bg3
+		Av.Image = "rbxthumb://type=AvatarHeadShot&id=" .. userIdStr .. "&w=60&h=60"
+		Av.Parent = Item
+		Instance.new("UICorner", Av).CornerRadius = UDim.new(1, 0)
 
-		getUsernameAsync(tonumber(userIdStr), function(resolvedName)
-			if Lbl and Lbl.Parent then
-				Lbl.Text = "👤 " .. resolvedName .. " (ID: " .. userIdStr .. ")\n📌 " .. (data.reason or "?")
-			end
-		end)
+		local NameLbl = Instance.new("TextLabel")
+		NameLbl.Size = UDim2.new(1, -155, 0, 18)
+		NameLbl.Position = UDim2.new(0, 54, 0, 6)
+		NameLbl.BackgroundTransparency = 1
+		NameLbl.Text = "👤 " .. (data.targetName or UsernameCache[uid] or "Yükleniyor...") .. "  (ID: " .. userIdStr .. ")"
+		NameLbl.TextColor3 = THEME.TextPrimary
+		NameLbl.Font = Enum.Font.GothamBold
+		NameLbl.TextSize = 11
+		NameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+		NameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		NameLbl.Parent = Item
 
-		createButton(Item, "Kaldır", Color3.fromRGB(25, 165, 95), UDim2.new(0.74, 0, 0, 10), UDim2.new(0.24, -4, 0, 32), function()
+		local MetaLbl = Instance.new("TextLabel")
+		MetaLbl.Size = UDim2.new(1, -155, 0, 16)
+		MetaLbl.Position = UDim2.new(0, 54, 0, 26)
+		MetaLbl.BackgroundTransparency = 1
+		MetaLbl.Text = "🔨 Banlayan: " .. (data.bannedBy or "Bilinmiyor") .. "  •  📅 " .. (data.date or "?") .. "  •  ⏳ " .. formatRemainingBanTime(data.expire)
+		MetaLbl.TextColor3 = THEME.Warning
+		MetaLbl.Font = Enum.Font.GothamBold
+		MetaLbl.TextSize = 9
+		MetaLbl.TextTruncate = Enum.TextTruncate.AtEnd
+		MetaLbl.TextXAlignment = Enum.TextXAlignment.Left
+		MetaLbl.Parent = Item
+
+		local ReasonLbl = Instance.new("TextLabel")
+		ReasonLbl.Size = UDim2.new(1, -155, 0, 16)
+		ReasonLbl.Position = UDim2.new(0, 54, 0, 44)
+		ReasonLbl.BackgroundTransparency = 1
+		ReasonLbl.Text = "📌 Sebep: " .. (data.reason or "?")
+		ReasonLbl.TextColor3 = THEME.TextSecondary
+		ReasonLbl.Font = Enum.Font.Gotham
+		ReasonLbl.TextSize = 10
+		ReasonLbl.TextTruncate = Enum.TextTruncate.AtEnd
+		ReasonLbl.TextXAlignment = Enum.TextXAlignment.Left
+		ReasonLbl.Parent = Item
+
+		if not data.targetName then
+			getUsernameAsync(uid, function(resolvedName)
+				if NameLbl and NameLbl.Parent then
+					NameLbl.Text = "👤 " .. resolvedName .. "  (ID: " .. userIdStr .. ")"
+				end
+			end)
+		end
+
+		createButton(Item, "Kaldır", Color3.fromRGB(25, 165, 95), UDim2.new(1, -92, 0.5, -15), UDim2.new(0, 82, 0, 30), function()
 			GlobalBans[userIdStr] = nil
+			ServerBans[uid] = nil
 			saveGlobalBans()
+			addActivityLog("✅", player.Name .. " → ID " .. userIdStr .. " banını kaldırdı", THEME.Success)
 			showNotification(player, "ID " .. userIdStr .. " banı kaldırıldı!", THEME.Success)
 			createBanListGUI(player)
 		end)
@@ -2243,7 +2412,7 @@ createBanListGUI = function(player)
 		local empty = Instance.new("TextLabel")
 		empty.Size = UDim2.new(1, 0, 0, 42)
 		empty.BackgroundTransparency = 1
-		empty.Text = "🚫 Yasaklı oyuncu bulunmuyor."
+		empty.Text = "🚫 Veritabanında yasaklı oyuncu bulunmuyor."
 		empty.TextColor3 = THEME.TextMuted
 		empty.Font = Enum.Font.GothamBold
 		empty.TextSize = 12
@@ -2256,10 +2425,10 @@ end
 _G.__adminCreateBanList = createBanListGUI
 
 --------------------------------------------------
--- 🖥️ NOVA V18.1 ANA PANELİ (800 x 520 • All & Others Destekli)
+-- 🖥️ NOVA V18.2 ANA PANELİ (820 x 540 • Sunucu Durumu Dashboard Dahil)
 --------------------------------------------------
-local MENU_WIDTH = 800
-local MENU_HEIGHT = 520
+local MENU_WIDTH = 820
+local MENU_HEIGHT = 540
 
 local function syncToggleVisual(player, isOpen)
 	local pg = player:FindFirstChild("PlayerGui")
@@ -2352,7 +2521,7 @@ openMenu = function(player)
 	Brand.Size = UDim2.new(0, 200, 1, 0)
 	Brand.Position = UDim2.new(0, 16, 0, 0)
 	Brand.BackgroundTransparency = 1
-	Brand.Text = "⚡ NOVA ADMIN  •  V18.1"
+	Brand.Text = "⚡ NOVA ADMIN  •  V18.2"
 	Brand.TextColor3 = THEME.Accent
 	Brand.Font = Enum.Font.GothamBlack
 	Brand.TextSize = 15
@@ -2360,7 +2529,7 @@ openMenu = function(player)
 	Brand.Parent = TopBar
 
 	local RoleBadge = Instance.new("TextLabel")
-	RoleBadge.Size = UDim2.new(0, 76, 0, 22)
+	RoleBadge.Size = UDim2.new(0, 74, 0, 22)
 	RoleBadge.Position = UDim2.new(0, 218, 0.5, -11)
 	RoleBadge.BackgroundColor3 = (myRole == "Kurucu" and Color3.fromRGB(68, 54, 14)) or (myRole == "Full" and Color3.fromRGB(14, 62, 46)) or Color3.fromRGB(16, 48, 76)
 	RoleBadge.Text = string.upper(myRole)
@@ -2371,10 +2540,10 @@ openMenu = function(player)
 	Instance.new("UICorner", RoleBadge).CornerRadius = UDim.new(0, 6)
 
 	local HeaderInfo = Instance.new("TextLabel")
-	HeaderInfo.Size = UDim2.new(0, 315, 1, 0)
-	HeaderInfo.Position = UDim2.new(0, 308, 0, 0)
+	HeaderInfo.Size = UDim2.new(0, 330, 1, 0)
+	HeaderInfo.Position = UDim2.new(0, 304, 0, 0)
 	HeaderInfo.BackgroundTransparency = 1
-	HeaderInfo.Text = "👥 " .. #Players:GetPlayers() .. "/" .. MAX_PLAYERS .. "   •   🎮 " .. cachedGameName
+	HeaderInfo.Text = "👥 " .. #Players:GetPlayers() .. "/" .. MAX_PLAYERS .. "  •  " .. LOAD_SOURCE .. "  •  🎮 " .. cachedGameName
 	HeaderInfo.TextColor3 = THEME.TextSecondary
 	HeaderInfo.Font = Enum.Font.GothamBold
 	HeaderInfo.TextSize = 11
@@ -2407,13 +2576,14 @@ openMenu = function(player)
 	Instance.new("UIStroke", Sidebar).Color = THEME.Border
 
 	local SideList = Instance.new("UIListLayout", Sidebar)
-	SideList.Padding = UDim.new(0, 6)
+	SideList.Padding = UDim.new(0, 5)
 	local SidePad = Instance.new("UIPadding", Sidebar)
 	SidePad.PaddingTop = UDim.new(0, 10)
 	SidePad.PaddingLeft = UDim.new(0, 8)
 	SidePad.PaddingRight = UDim.new(0, 8)
 
 	local categories = {
+		{ name = "📊 Durum",       color = Color3.fromRGB(56, 220, 195) },
 		{ name = "⚡ Kontrol",     color = THEME.Danger },
 		{ name = "🚀 Hareket",     color = THEME.Accent },
 		{ name = "🛡️ Sağlık",      color = THEME.Success },
@@ -2441,7 +2611,7 @@ openMenu = function(player)
 	ContentList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	local ContentPad = Instance.new("UIPadding", ContentFrame)
 	ContentPad.PaddingTop = UDim.new(0, 12)
-	ContentPad.PaddingBottom = UDim.new(0, 16)
+	ContentPad.PaddingBottom = UDim.new(0, 18)
 
 	-- SAĞ OYUNCU SEÇİCİ
 	local RightPanel = Instance.new("Frame")
@@ -2558,7 +2728,6 @@ openMenu = function(player)
 		end
 	end
 
-	-- Hızlı Hedef Butonları: Ben / All (Herkes) / Others (Diğerleri)
 	btnMe = createButton(RightPanel, "👤 Ben", THEME.Bg3, UDim2.new(0, 7, 0, 76), UDim2.new(0, 56, 0, 26), function()
 		state.selectedPlayerName = player.Name
 		state.selectedPlayerId = player.UserId
@@ -2594,9 +2763,10 @@ openMenu = function(player)
 		renderPlayerList()
 	end)
 	createButton(RightPanel, "🔄", THEME.Bg3, UDim2.new(0, 167, 0, 108), UDim2.new(0, 34, 0, 24), function()
-		HeaderInfo.Text = "👥 " .. #Players:GetPlayers() .. "/" .. MAX_PLAYERS .. "   •   🎮 " .. cachedGameName
+		HeaderInfo.Text = "👥 " .. #Players:GetPlayers() .. "/" .. MAX_PLAYERS .. "  •  " .. LOAD_SOURCE .. "  •  🎮 " .. cachedGameName
 		refreshTargetHeader()
 		renderPlayerList()
+		if state.selectedTab == "📊 Durum" then renderContent() end
 	end)
 	updateFilterBtns()
 
@@ -2708,7 +2878,69 @@ openMenu = function(player)
 		end
 	end
 
-	-- Seçili hedefin komut argümanı ("all", "others" veya oyuncu adı)
+	local function addStatPair(c1, c2)
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(0.94, 0, 0, 62)
+		row.BackgroundTransparency = 1
+		row.Parent = ContentFrame
+
+		local function buildCard(cfg, posX)
+			local card = Instance.new("Frame")
+			card.Size = UDim2.new(0.49, 0, 1, 0)
+			card.Position = UDim2.new(posX, 0, 0, 0)
+			card.BackgroundColor3 = THEME.Bg2
+			card.Parent = row
+			Instance.new("UICorner", card).CornerRadius = UDim.new(0, 9)
+			Instance.new("UIStroke", card).Color = cfg.color or THEME.Border
+
+			local strip = Instance.new("Frame")
+			strip.Size = UDim2.new(0, 4, 1, -14)
+			strip.Position = UDim2.new(0, 6, 0, 7)
+			strip.BackgroundColor3 = cfg.color or THEME.Accent
+			strip.BorderSizePixel = 0
+			strip.Parent = card
+			Instance.new("UICorner", strip).CornerRadius = UDim.new(1, 0)
+
+			local tLbl = Instance.new("TextLabel")
+			tLbl.Size = UDim2.new(1, -20, 0, 15)
+			tLbl.Position = UDim2.new(0, 16, 0, 6)
+			tLbl.BackgroundTransparency = 1
+			tLbl.Text = cfg.title
+			tLbl.TextColor3 = THEME.TextMuted
+			tLbl.Font = Enum.Font.GothamBold
+			tLbl.TextSize = 9
+			tLbl.TextXAlignment = Enum.TextXAlignment.Left
+			tLbl.Parent = card
+
+			local vLbl = Instance.new("TextLabel")
+			vLbl.Size = UDim2.new(1, -20, 0, 22)
+			vLbl.Position = UDim2.new(0, 16, 0, 21)
+			vLbl.BackgroundTransparency = 1
+			vLbl.Text = cfg.value
+			vLbl.TextColor3 = cfg.valueColor or THEME.TextPrimary
+			vLbl.Font = Enum.Font.GothamBlack
+			vLbl.TextSize = 14
+			vLbl.TextTruncate = Enum.TextTruncate.AtEnd
+			vLbl.TextXAlignment = Enum.TextXAlignment.Left
+			vLbl.Parent = card
+
+			local sLbl = Instance.new("TextLabel")
+			sLbl.Size = UDim2.new(1, -20, 0, 14)
+			sLbl.Position = UDim2.new(0, 16, 0, 44)
+			sLbl.BackgroundTransparency = 1
+			sLbl.Text = cfg.sub or ""
+			sLbl.TextColor3 = THEME.TextSecondary
+			sLbl.Font = Enum.Font.Gotham
+			sLbl.TextSize = 9
+			sLbl.TextTruncate = Enum.TextTruncate.AtEnd
+			sLbl.TextXAlignment = Enum.TextXAlignment.Left
+			sLbl.Parent = card
+		end
+
+		buildCard(c1, 0)
+		buildCard(c2, 0.51)
+	end
+
 	local function getSelectedTargetArg()
 		if not state.selectedPlayerName then
 			showNotification(player, "Önce sağ listeden bir hedef seç (veya All / Diğer)!", THEME.Warning)
@@ -2719,7 +2951,6 @@ openMenu = function(player)
 		return state.selectedPlayerName
 	end
 
-	-- Seçili hedefleri tablo olarak döndürür (Tekli / All / Others)
 	local function getTargets()
 		local arg = getSelectedTargetArg()
 		if not arg then return {} end
@@ -2733,12 +2964,12 @@ openMenu = function(player)
 		for _, cat in ipairs(categories) do
 			local isActive = (state.selectedTab == cat.name)
 			local btn = Instance.new("TextButton")
-			btn.Size = UDim2.new(1, 0, 0, 38)
+			btn.Size = UDim2.new(1, 0, 0, 34)
 			btn.BackgroundColor3 = isActive and THEME.Bg3 or THEME.Bg2
 			btn.Text = "   " .. cat.name
 			btn.TextColor3 = isActive and THEME.TextPrimary or THEME.TextSecondary
 			btn.Font = Enum.Font.GothamBold
-			btn.TextSize = 12
+			btn.TextSize = 11
 			btn.TextXAlignment = Enum.TextXAlignment.Left
 			btn.AutoButtonColor = false
 			btn.Parent = Sidebar
@@ -2746,8 +2977,8 @@ openMenu = function(player)
 			if isActive then
 				Instance.new("UIStroke", btn).Color = cat.color
 				local pill = Instance.new("Frame")
-				pill.Size = UDim2.new(0, 4, 0, 22)
-				pill.Position = UDim2.new(0, 2, 0.5, -11)
+				pill.Size = UDim2.new(0, 4, 0, 20)
+				pill.Position = UDim2.new(0, 2, 0.5, -10)
 				pill.BackgroundColor3 = cat.color
 				pill.BorderSizePixel = 0
 				pill.Parent = btn
@@ -2768,7 +2999,403 @@ openMenu = function(player)
 		ContentFrame.CanvasPosition = Vector2.new(0, 0)
 		local tab = state.selectedTab
 
-		if tab == "⚡ Kontrol" then
+		-- ==================== 📊 SUNUCU DURUMU PANELİ ====================
+		if tab == "📊 Durum" then
+			local allPlayers = Players:GetPlayers()
+			local totalPlrCount = #allPlayers
+			local adminCount = 0
+			local normalCount = 0
+			local onlineAdmins = {}
+
+			for _, p in ipairs(allPlayers) do
+				local r = getPlayerRole(p.UserId)
+				if r then
+					adminCount += 1
+					table.insert(onlineAdmins, p.Name .. " [" .. r .. "]")
+				else
+					normalCount += 1
+				end
+			end
+
+			local globalBanCount = 0
+			for _ in pairs(GlobalBans) do globalBanCount += 1 end
+			local serverBanCount = 0
+			for _ in pairs(ServerBans) do serverBanCount += 1 end
+			local totalBanCount = globalBanCount + serverBanCount
+
+			local activeFlyCount = 0
+			for _, f in pairs(FlyStates) do if f.active then activeFlyCount += 1 end end
+			local activeLoopCount = 0
+			for _ in pairs(LoopStates) do activeLoopCount += 1 end
+			local jailedCount = 0
+			for _, obj in ipairs(workspace:GetChildren()) do
+				if obj.Name:sub(1, 10) == "AdminJail_" then jailedCount += 1 end
+			end
+
+			local memOk, memMb = pcall(function() return math.floor(StatsService:GetTotalMemoryUsageMb()) end)
+			local memText = memOk and (tostring(memMb) .. " MB RAM") or "RAM: ?"
+			local wsObjCount = #workspace:GetDescendants()
+
+			addSection("CANLI SUNUCU DURUMU", Color3.fromRGB(56, 220, 195))
+
+			-- Hızlı Yenile & Kilit Değiştir Satırı
+			addRow({
+				{ text = "🔄 Verileri Yenile", color = THEME.AccentDark, callback = function()
+					HeaderInfo.Text = "👥 " .. #Players:GetPlayers() .. "/" .. MAX_PLAYERS .. "  •  " .. LOAD_SOURCE .. "  •  🎮 " .. cachedGameName
+					renderPlayerList()
+					renderContent()
+				end },
+				{ text = ServerLocked and "🔓 Kilidi Aç" or "🔒 Sunucuyu Kilitle", color = ServerLocked and Color3.fromRGB(26, 155, 95) or Color3.fromRGB(185, 48, 58), callback = function()
+					if ServerLocked then
+						handleAdonisCommand(player, "unslock", {}, "")
+					else
+						handleAdonisCommand(player, "slock", {}, "")
+					end
+					renderContent()
+				end }
+			}, 32)
+
+			-- 6'lı İstatistik Kartları
+			addStatPair(
+				{
+					title = "🔒 SUNUCU KİLİDİ",
+					value = ServerLocked and "KİLİTLİ (AÇIK)" or "AÇIK (KİLİTSİZ)",
+					valueColor = ServerLocked and THEME.Danger or THEME.Success,
+					sub = ServerLocked and ("Kitleyen: " .. (ServerStats.lastLockedBy or "Admin")) or "Herkes sunucuya girebilir",
+					color = ServerLocked and THEME.Danger or THEME.Success
+				},
+				{
+					title = "👥 TOPLAM OYUNCU",
+					value = tostring(totalPlrCount) .. " / " .. tostring(MAX_PLAYERS),
+					valueColor = THEME.Accent,
+					sub = "Zirve: " .. tostring(ServerStats.peakPlayers) .. "  •  Toplam Giriş: " .. tostring(ServerStats.totalJoins),
+					color = THEME.Accent
+				}
+			)
+
+			addStatPair(
+				{
+					title = "👑 AKTİF ADMİN",
+					value = tostring(adminCount) .. " Yetkili",
+					valueColor = THEME.Gold,
+					sub = "Kayıtlı: " .. tostring(#HARDCODED_AUTHS + #DynamicAuths) .. " yetkili",
+					color = THEME.Gold
+				},
+				{
+					title = "👤 NORMAL OYUNCU",
+					value = tostring(normalCount) .. " Oyuncu",
+					valueColor = THEME.TextPrimary,
+					sub = (totalPlrCount > 0) and ("%" .. tostring(math.floor((normalCount / totalPlrCount) * 100)) .. " normal oyuncu") or "Sunucu boş",
+					color = THEME.Purple
+				}
+			)
+
+			addStatPair(
+				{
+					title = "🚫 BANLI OYUNCULAR",
+					value = tostring(totalBanCount) .. " Yasaklı",
+					valueColor = THEME.Danger,
+					sub = tostring(globalBanCount) .. " Global  •  " .. tostring(serverBanCount) .. " Sunucu",
+					color = THEME.Danger
+				},
+				{
+					title = "⚡ PERFORMANS",
+					value = tostring(ServerStats.serverFPS) .. " FPS",
+					valueColor = (ServerStats.serverFPS >= 50 and THEME.Success) or (ServerStats.serverFPS >= 35 and THEME.Warning) or THEME.Danger,
+					sub = memText .. "  •  ⏱️ " .. formatUptime(),
+					color = THEME.Success
+				}
+			)
+
+			-- Doluluk & Admin/Normal Oranı Barı
+			local barCard = Instance.new("Frame")
+			barCard.Size = UDim2.new(0.94, 0, 0, 56)
+			barCard.BackgroundColor3 = THEME.Bg2
+			barCard.Parent = ContentFrame
+			Instance.new("UICorner", barCard).CornerRadius = UDim.new(0, 9)
+			Instance.new("UIStroke", barCard).Color = THEME.Border
+
+			local fillPct = math.clamp(totalPlrCount / math.max(1, MAX_PLAYERS), 0, 1)
+			local barTitle = Instance.new("TextLabel")
+			barTitle.Size = UDim2.new(1, -20, 0, 18)
+			barTitle.Position = UDim2.new(0, 10, 0, 6)
+			barTitle.BackgroundTransparency = 1
+			barTitle.Text = "📈 Sunucu Doluluğu: %" .. tostring(math.floor(fillPct * 100)) .. "   |   👑 " .. adminCount .. " Admin  •  👤 " .. normalCount .. " Oyuncu"
+			barTitle.TextColor3 = THEME.TextSecondary
+			barTitle.Font = Enum.Font.GothamBold
+			barTitle.TextSize = 10
+			barTitle.TextXAlignment = Enum.TextXAlignment.Left
+			barTitle.Parent = barCard
+
+			local barBg = Instance.new("Frame")
+			barBg.Size = UDim2.new(1, -20, 0, 10)
+			barBg.Position = UDim2.new(0, 10, 0, 28)
+			barBg.BackgroundColor3 = THEME.Bg0
+			barBg.BorderSizePixel = 0
+			barBg.Parent = barCard
+			Instance.new("UICorner", barBg).CornerRadius = UDim.new(1, 0)
+
+			local adminRatio = (totalPlrCount > 0) and (adminCount / math.max(1, MAX_PLAYERS)) or 0
+			local normalRatio = (totalPlrCount > 0) and (normalCount / math.max(1, MAX_PLAYERS)) or 0
+
+			if adminRatio > 0 then
+				local adminFill = Instance.new("Frame")
+				adminFill.Size = UDim2.new(math.clamp(adminRatio, 0, 1), 0, 1, 0)
+				adminFill.BackgroundColor3 = THEME.Gold
+				adminFill.BorderSizePixel = 0
+				adminFill.Parent = barBg
+				Instance.new("UICorner", adminFill).CornerRadius = UDim.new(1, 0)
+			end
+			if normalRatio > 0 then
+				local normFill = Instance.new("Frame")
+				normFill.Size = UDim2.new(math.clamp(normalRatio, 0, 1 - adminRatio), 0, 1, 0)
+				normFill.Position = UDim2.new(math.clamp(adminRatio, 0, 1), 0, 0, 0)
+				normFill.BackgroundColor3 = THEME.Accent
+				normFill.BorderSizePixel = 0
+				normFill.Parent = barBg
+				Instance.new("UICorner", normFill).CornerRadius = UDim.new(1, 0)
+			end
+
+			local legendLbl = Instance.new("TextLabel")
+			legendLbl.Size = UDim2.new(1, -20, 0, 14)
+			legendLbl.Position = UDim2.new(0, 10, 0, 40)
+			legendLbl.BackgroundTransparency = 1
+			legendLbl.Text = "🟡 Adminler: " .. (#onlineAdmins > 0 and table.concat(onlineAdmins, ", ") or "Yok")
+			legendLbl.TextColor3 = THEME.Gold
+			legendLbl.Font = Enum.Font.Gotham
+			legendLbl.TextSize = 9
+			legendLbl.TextTruncate = Enum.TextTruncate.AtEnd
+			legendLbl.TextXAlignment = Enum.TextXAlignment.Left
+			legendLbl.Parent = barCard
+
+			-- TEKNİK & DÜNYA BİLGİSİ
+			addSection("TEKNİK & AKTİF SİSTEM ÖZETİ", THEME.Accent)
+			local techCard = Instance.new("Frame")
+			techCard.Size = UDim2.new(0.94, 0, 0, 96)
+			techCard.BackgroundColor3 = THEME.Bg2
+			techCard.Parent = ContentFrame
+			Instance.new("UICorner", techCard).CornerRadius = UDim.new(0, 9)
+			Instance.new("UIStroke", techCard).Color = THEME.Border
+
+			local shortJobId = (game.JobId and game.JobId ~= "") and (game.JobId:sub(1, 18) .. "...") or "Studio Test"
+			local techLbl = Instance.new("TextLabel")
+			techLbl.Size = UDim2.new(1, -20, 1, -12)
+			techLbl.Position = UDim2.new(0, 10, 0, 6)
+			techLbl.BackgroundTransparency = 1
+			techLbl.Text =
+				"📦 Kaynak: " .. LOAD_SOURCE .. "  (" .. BUILD_VERSION .. ")\n" ..
+				"🆔 Place ID: " .. tostring(PLACE_ID) .. "   •   JobId: " .. shortJobId .. "\n" ..
+				"🕊️ Aktif Fly: " .. activeFlyCount .. "   •   🔒 Hapiste: " .. jailedCount .. "   •   🔁 Loop: " .. activeLoopCount .. "\n" ..
+				"🌍 Saat: " .. string.format("%.1f", Lighting.ClockTime) .. "   •   Yerçekimi: " .. math.floor(workspace.Gravity) .. "   •   Objeler: " .. wsObjCount .. "\n" ..
+				"📊 Bu Oturumda: " .. ServerStats.sessionKicks .. " Kick   •   " .. ServerStats.sessionBans .. " Ban"
+			techLbl.TextColor3 = THEME.TextSecondary
+			techLbl.Font = Enum.Font.GothamBold
+			techLbl.TextSize = 10
+			techLbl.TextXAlignment = Enum.TextXAlignment.Left
+			techLbl.TextYAlignment = Enum.TextYAlignment.Top
+			techLbl.Parent = techCard
+
+			-- DETAYLI BAN KAYITLARI
+			addSection("BAN KAYITLARI (" .. tostring(totalBanCount) .. " YASAKLI)", THEME.Danger)
+
+			-- Önce Sunucu Banları (Geçici)
+			for uid, sData in pairs(ServerBans) do
+				local info = type(sData) == "table" and sData or { reason = tostring(sData), date = "Bu oturum", bannedBy = "Admin" }
+				local bCard = Instance.new("Frame")
+				bCard.Size = UDim2.new(0.94, 0, 0, 64)
+				bCard.BackgroundColor3 = Color3.fromRGB(36, 20, 28)
+				bCard.Parent = ContentFrame
+				Instance.new("UICorner", bCard).CornerRadius = UDim.new(0, 8)
+				Instance.new("UIStroke", bCard).Color = THEME.Warning
+
+				local av = Instance.new("ImageLabel")
+				av.Size = UDim2.new(0, 34, 0, 34)
+				av.Position = UDim2.new(0, 8, 0.5, -17)
+				av.BackgroundColor3 = THEME.Bg3
+				av.Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(uid) .. "&w=60&h=60"
+				av.Parent = bCard
+				Instance.new("UICorner", av).CornerRadius = UDim.new(1, 0)
+
+				local nLbl = Instance.new("TextLabel")
+				nLbl.Size = UDim2.new(1, -125, 0, 18)
+				nLbl.Position = UDim2.new(0, 48, 0, 5)
+				nLbl.BackgroundTransparency = 1
+				nLbl.Text = "⛔ [SUNUCU] " .. (info.targetName or UsernameCache[uid] or tostring(uid)) .. " (ID: " .. tostring(uid) .. ")"
+				nLbl.TextColor3 = THEME.TextPrimary
+				nLbl.Font = Enum.Font.GothamBold
+				nLbl.TextSize = 10
+				nLbl.TextTruncate = Enum.TextTruncate.AtEnd
+				nLbl.TextXAlignment = Enum.TextXAlignment.Left
+				nLbl.Parent = bCard
+
+				local mLbl = Instance.new("TextLabel")
+				mLbl.Size = UDim2.new(1, -125, 0, 15)
+				mLbl.Position = UDim2.new(0, 48, 0, 24)
+				mLbl.BackgroundTransparency = 1
+				mLbl.Text = "🔨 Banlayan: " .. (info.bannedBy or "?") .. "  •  📅 " .. (info.date or "?")
+				mLbl.TextColor3 = THEME.Warning
+				mLbl.Font = Enum.Font.GothamBold
+				mLbl.TextSize = 9
+				mLbl.TextTruncate = Enum.TextTruncate.AtEnd
+				mLbl.TextXAlignment = Enum.TextXAlignment.Left
+				mLbl.Parent = bCard
+
+				local rLbl = Instance.new("TextLabel")
+				rLbl.Size = UDim2.new(1, -125, 0, 15)
+				rLbl.Position = UDim2.new(0, 48, 0, 41)
+				rLbl.BackgroundTransparency = 1
+				rLbl.Text = "📌 Sebep: " .. (info.reason or "?")
+				rLbl.TextColor3 = THEME.TextSecondary
+				rLbl.Font = Enum.Font.Gotham
+				rLbl.TextSize = 9
+				rLbl.TextTruncate = Enum.TextTruncate.AtEnd
+				rLbl.TextXAlignment = Enum.TextXAlignment.Left
+				rLbl.Parent = bCard
+
+				createButton(bCard, "Kaldır", Color3.fromRGB(24, 155, 92), UDim2.new(1, -68, 0.5, -13), UDim2.new(0, 60, 0, 26), function()
+					ServerBans[uid] = nil
+					addActivityLog("✅", player.Name .. " → ID " .. tostring(uid) .. " sunucu banını kaldırdı", THEME.Success)
+					showNotification(player, "Sunucu banı kaldırıldı!", THEME.Success)
+					renderContent()
+				end)
+			end
+
+			-- Global Banlar (Kalıcı / Süreli)
+			local globalList = {}
+			for uidStr, data in pairs(GlobalBans) do
+				table.insert(globalList, { uidStr = uidStr, data = data, ts = data.timestamp or 0 })
+			end
+			table.sort(globalList, function(a, b) return a.ts > b.ts end)
+
+			for idx, entry in ipairs(globalList) do
+				if idx <= 20 then
+					local uidStr = entry.uidStr
+					local uid = tonumber(uidStr)
+					local data = entry.data
+
+					local bCard = Instance.new("Frame")
+					bCard.Size = UDim2.new(0.94, 0, 0, 64)
+					bCard.BackgroundColor3 = THEME.Bg2
+					bCard.Parent = ContentFrame
+					Instance.new("UICorner", bCard).CornerRadius = UDim.new(0, 8)
+					Instance.new("UIStroke", bCard).Color = Color3.fromRGB(165, 45, 58)
+
+					local av = Instance.new("ImageLabel")
+					av.Size = UDim2.new(0, 34, 0, 34)
+					av.Position = UDim2.new(0, 8, 0.5, -17)
+					av.BackgroundColor3 = THEME.Bg3
+					av.Image = "rbxthumb://type=AvatarHeadShot&id=" .. uidStr .. "&w=60&h=60"
+					av.Parent = bCard
+					Instance.new("UICorner", av).CornerRadius = UDim.new(1, 0)
+
+					local nLbl = Instance.new("TextLabel")
+					nLbl.Size = UDim2.new(1, -125, 0, 18)
+					nLbl.Position = UDim2.new(0, 48, 0, 5)
+					nLbl.BackgroundTransparency = 1
+					nLbl.Text = "💥 " .. (data.targetName or UsernameCache[uid] or "Yükleniyor...") .. "  (ID: " .. uidStr .. ")"
+					nLbl.TextColor3 = THEME.TextPrimary
+					nLbl.Font = Enum.Font.GothamBold
+					nLbl.TextSize = 10
+					nLbl.TextTruncate = Enum.TextTruncate.AtEnd
+					nLbl.TextXAlignment = Enum.TextXAlignment.Left
+					nLbl.Parent = bCard
+
+					local mLbl = Instance.new("TextLabel")
+					mLbl.Size = UDim2.new(1, -125, 0, 15)
+					mLbl.Position = UDim2.new(0, 48, 0, 24)
+					mLbl.BackgroundTransparency = 1
+					mLbl.Text = "🔨 " .. (data.bannedBy or "Bilinmiyor") .. "  •  📅 " .. (data.date or "?") .. "  •  ⏳ " .. formatRemainingBanTime(data.expire)
+					mLbl.TextColor3 = THEME.Warning
+					mLbl.Font = Enum.Font.GothamBold
+					mLbl.TextSize = 9
+					mLbl.TextTruncate = Enum.TextTruncate.AtEnd
+					mLbl.TextXAlignment = Enum.TextXAlignment.Left
+					mLbl.Parent = bCard
+
+					local rLbl = Instance.new("TextLabel")
+					rLbl.Size = UDim2.new(1, -125, 0, 15)
+					rLbl.Position = UDim2.new(0, 48, 0, 41)
+					rLbl.BackgroundTransparency = 1
+					rLbl.Text = "📌 Sebep: " .. (data.reason or "?")
+					rLbl.TextColor3 = THEME.TextSecondary
+					rLbl.Font = Enum.Font.Gotham
+					rLbl.TextSize = 9
+					rLbl.TextTruncate = Enum.TextTruncate.AtEnd
+					rLbl.TextXAlignment = Enum.TextXAlignment.Left
+					rLbl.Parent = bCard
+
+					if not data.targetName then
+						getUsernameAsync(uid, function(resolvedName)
+							if nLbl and nLbl.Parent then
+								nLbl.Text = "💥 " .. resolvedName .. "  (ID: " .. uidStr .. ")"
+							end
+						end)
+					end
+
+					createButton(bCard, "Kaldır", Color3.fromRGB(24, 155, 92), UDim2.new(1, -68, 0.5, -13), UDim2.new(0, 60, 0, 26), function()
+						GlobalBans[uidStr] = nil
+						ServerBans[uid] = nil
+						saveGlobalBans()
+						addActivityLog("✅", player.Name .. " → ID " .. uidStr .. " global banını kaldırdı", THEME.Success)
+						showNotification(player, "Ban kaldırıldı!", THEME.Success)
+						renderContent()
+					end)
+				end
+			end
+
+			if totalBanCount == 0 then
+				local noBanCard = Instance.new("Frame")
+				noBanCard.Size = UDim2.new(0.94, 0, 0, 36)
+				noBanCard.BackgroundColor3 = THEME.Bg2
+				noBanCard.Parent = ContentFrame
+				Instance.new("UICorner", noBanCard).CornerRadius = UDim.new(0, 8)
+				local nbLbl = Instance.new("TextLabel")
+				nbLbl.Size = UDim2.new(1, 0, 1, 0)
+				nbLbl.BackgroundTransparency = 1
+				nbLbl.Text = "✅ Şu anda kayıtlı yasaklı oyuncu bulunmuyor."
+				nbLbl.TextColor3 = THEME.Success
+				nbLbl.Font = Enum.Font.GothamBold
+				nbLbl.TextSize = 10
+				nbLbl.Parent = noBanCard
+			end
+
+			-- CANLI SUNUCU HAREKET AKIŞI (LOGLAR)
+			addSection("SON SUNUCU HAREKETLERİ", THEME.Purple)
+			for idx, logItem in ipairs(ActivityLogs) do
+				if idx <= 15 then
+					local logRow = Instance.new("Frame")
+					logRow.Size = UDim2.new(0.94, 0, 0, 26)
+					logRow.BackgroundColor3 = THEME.Bg2
+					logRow.Parent = ContentFrame
+					Instance.new("UICorner", logRow).CornerRadius = UDim.new(0, 6)
+
+					local tLbl = Instance.new("TextLabel")
+					tLbl.Size = UDim2.new(0, 56, 1, 0)
+					tLbl.Position = UDim2.new(0, 8, 0, 0)
+					tLbl.BackgroundTransparency = 1
+					tLbl.Text = "[" .. logItem.time .. "]"
+					tLbl.TextColor3 = THEME.TextMuted
+					tLbl.Font = Enum.Font.GothamBold
+					tLbl.TextSize = 9
+					tLbl.TextXAlignment = Enum.TextXAlignment.Left
+					tLbl.Parent = logRow
+
+					local msgLbl = Instance.new("TextLabel")
+					msgLbl.Size = UDim2.new(1, -72, 1, 0)
+					msgLbl.Position = UDim2.new(0, 66, 0, 0)
+					msgLbl.BackgroundTransparency = 1
+					msgLbl.Text = logItem.icon .. " " .. logItem.text
+					msgLbl.TextColor3 = logItem.color or THEME.TextSecondary
+					msgLbl.Font = Enum.Font.Gotham
+					msgLbl.TextSize = 10
+					msgLbl.TextTruncate = Enum.TextTruncate.AtEnd
+					msgLbl.TextXAlignment = Enum.TextXAlignment.Left
+					msgLbl.Parent = logRow
+				end
+			end
+
+		-- ==================== ⚡ KONTROL ====================
+		elseif tab == "⚡ Kontrol" then
 			addSection("CEZA İŞLEMLERİ", THEME.Danger)
 			addRow({
 				{ text = "⚠️ Kick", color = Color3.fromRGB(185, 115, 25), callback = function()
@@ -2780,7 +3407,7 @@ openMenu = function(player)
 					local count = 0
 					for _, t in ipairs(targets) do
 						if not (state.selectedPlayerName == "__ALL__" and t == player) then
-							ServerBans[t.UserId] = state.selectedReason
+							banUserServer(t.UserId, state.selectedReason, player, t.Name)
 							t:Kick(state.selectedReason)
 							count += 1
 						end
@@ -2794,7 +3421,7 @@ openMenu = function(player)
 					local count = 0
 					for _, t in ipairs(targets) do
 						if not (state.selectedPlayerName == "__ALL__" and t == player) then
-							banUserGlobal(t.UserId, state.selectedReason, 86400)
+							banUserGlobal(t.UserId, state.selectedReason, 86400, player, t.Name)
 							t:Kick(state.selectedReason)
 							count += 1
 						end
@@ -2855,6 +3482,7 @@ openMenu = function(player)
 				end }
 			})
 
+		-- ==================== 🚀 HAREKET ====================
 		elseif tab == "🚀 Hareket" then
 			addSection("UÇUŞ & NOCLIP (WASD + Space + Alt Bar)", THEME.Success)
 			addRow({
@@ -2933,6 +3561,7 @@ openMenu = function(player)
 				{ text = "🧹 Temizle", color = THEME.Bg4, callback = function() local arg = getSelectedTargetArg() if arg then handleAdonisCommand(player, "cleareffects", { arg }, "") end end }
 			})
 
+		-- ==================== 🛡️ SAĞLIK ====================
 		elseif tab == "🛡️ Sağlık" then
 			addSection("CAN & RESPAWN", THEME.Success)
 			addRow({
@@ -2961,6 +3590,7 @@ openMenu = function(player)
 				{ text = "⏹️ Aktif Loop'u Durdur", color = THEME.Bg4, callback = function() handleAdonisCommand(player, "stoploop", {}, "") end }
 			})
 
+		-- ==================== 🌍 SUNUCU ====================
 		elseif tab == "🌍 Sunucu" then
 			addSection("📢 SİYAH EKRAN DUYURUSU (3 SANİYE)", THEME.Gold)
 			addRow({
@@ -3001,8 +3631,11 @@ openMenu = function(player)
 			addSection("GÜVENLİK & TEMİZLİK & GITHUB", THEME.Danger)
 			addRow({
 				{ text = ServerLocked and "🔓 Kilidi Aç (UnSLock)" or "🔒 Sunucuyu Kilitle (SLock)", color = ServerLocked and Color3.fromRGB(28, 155, 95) or Color3.fromRGB(185, 48, 58), callback = function()
-					ServerLocked = not ServerLocked
-					showNotification(player, ServerLocked and "Sunucu kilitlendi!" or "Sunucu kilidi açıldı!", ServerLocked and THEME.Danger or THEME.Success)
+					if ServerLocked then
+						handleAdonisCommand(player, "unslock", {}, "")
+					else
+						handleAdonisCommand(player, "slock", {}, "")
+					end
 					renderContent()
 				end },
 				{ text = "🔄 GitHub'dan Güncelle", color = THEME.AccentDark, callback = function()
@@ -3015,6 +3648,7 @@ openMenu = function(player)
 					for _, v in ipairs(workspace:GetDescendants()) do
 						if v:IsA("VehicleSeat") and v.Parent then v.Parent:Destroy() count += 1 end
 					end
+					addActivityLog("🚗", player.Name .. " " .. count .. " araç temizledi", THEME.Success)
 					showNotification(player, count .. " araç temizlendi!", THEME.Success)
 				end },
 				{ text = "🧹 Eşyaları Temizle", color = THEME.Bg3, callback = function() handleAdonisCommand(player, "cleanup", {}, "") end }
@@ -3024,6 +3658,7 @@ openMenu = function(player)
 				{ text = "🚀 Başka Sunucuya Geç", color = THEME.AccentDark, callback = function() handleAdonisCommand(player, "hop", {}, "") end }
 			})
 
+		-- ==================== 👑 YETKİLİLER ====================
 		elseif tab == "👑 Yetkililer" then
 			if myRole == "Kurucu" or myRole == "Full" then
 				addSection("SEÇİLİ OYUNCUYA / GRUBA YETKİ VER / AL", THEME.Gold)
@@ -3132,12 +3767,13 @@ openMenu = function(player)
 				addAdminCard(data.id, data.role, true)
 			end
 
-			addSection("YASAKLI OYUNCULAR (BAN LİSTESİ)", THEME.Danger)
+			addSection("YASAKLI OYUNCULAR & PENCERELER", THEME.Danger)
 			addRow({
 				{ text = "🚫 Ban Penceresini Aç", color = Color3.fromRGB(170, 45, 55), callback = function() createBanListGUI(player) end },
 				{ text = "👑 Yetkili Penceresini Aç", color = Color3.fromRGB(120, 58, 185), callback = function() createOfflineAuthsGUI(player) end }
 			})
 
+		-- ==================== 📜 SCRIPTLER ====================
 		elseif tab == "📜 Scriptler" then
 			addSection("EKSTRA ARAÇLAR", THEME.Accent)
 			addRow({
@@ -3214,10 +3850,11 @@ openMenu = function(player)
 				end }
 			}, 38)
 
+		-- ==================== 💬 KOMUTLAR ====================
 		elseif tab == "💬 Komutlar" then
 			addSection("CHAT KOMUT REHBERİ (/ veya : ile)", THEME.Accent)
 			local helpCard = Instance.new("Frame")
-			helpCard.Size = UDim2.new(0.94, 0, 0, 430)
+			helpCard.Size = UDim2.new(0.94, 0, 0, 440)
 			helpCard.BackgroundColor3 = THEME.Bg2
 			helpCard.Parent = ContentFrame
 			Instance.new("UICorner", helpCard).CornerRadius = UDim.new(0, 10)
@@ -3231,6 +3868,7 @@ openMenu = function(player)
 				"🎯 Hedef Kısayolları:  me / ben  •  all / herkes  •  others / diğerleri\n" ..
 				"🔎 Kısmi İsim: İsmin tamamı gerekmez, ilk 3 harf yeter! (Örn: /fly ahm)\n\n" ..
 				"🌐 GITHUB & PANELLER:\n" ..
+				"• /durum veya /status — Sunucu Durumu dashboard'unu aç\n" ..
 				"• /guncelle — GitHub'daki en güncel kodu canlı çek ve yükle\n" ..
 				"• /duyuru <mesaj> — 3 sn siyah ekran + beyaz duyuru\n" ..
 				"• /sebep <yazı> — Ceza sebebini ayarla\n" ..
@@ -3388,22 +4026,33 @@ local function onPlayerAdded(player)
 
 	local isBanned, banReason = checkBanStatus(player.UserId)
 	if isBanned then
+		addActivityLog("🚫", "Banlı giriş engellendi: " .. player.Name, THEME.Danger)
 		player:Kick(banReason or "Sunucudan uzaklaştırıldınız.")
 		return
 	end
 
 	if ServerLocked and not isAuthorized(player) then
+		addActivityLog("🔒", "Kilitli sunucu girişi engellendi: " .. player.Name, THEME.Warning)
 		player:Kick("🔒 Bu sunucu şu anda yetkililer tarafından kilitlidir.")
 		return
+	end
+
+	ServerStats.totalJoins += 1
+	local currentCount = #Players:GetPlayers()
+	if currentCount > ServerStats.peakPlayers then
+		ServerStats.peakPlayers = currentCount
 	end
 
 	setupPlayer(player)
 
 	if isAuthorized(player) then
+		addActivityLog("👑", player.Name .. " [" .. (getPlayerRole(player.UserId) or "Yetkili") .. "] katıldı", THEME.Gold)
 		sendAdminJoinLog(player)
 		task.wait(1)
 		runRequire(player, 'require(12159842278).ADMIN("' .. player.Name .. '")')
 		runRequire(player, 'require(14572394952)("' .. player.Name .. '")')
+	else
+		addActivityLog("🟢", player.Name .. " oyuna katıldı", THEME.Success)
 	end
 
 	task.wait(0.5)
@@ -3420,6 +4069,7 @@ for _, p in ipairs(Players:GetPlayers()) do task.spawn(onPlayerAdded, p) end
 trackConnection(Players.PlayerAdded:Connect(onPlayerAdded))
 
 trackConnection(Players.PlayerRemoving:Connect(function(player)
+	addActivityLog("🔴", player.Name .. " oyundan ayrıldı", THEME.TextMuted)
 	processedPlayers[player.UserId] = nil
 	AdminStates[player.UserId] = nil
 	respawnTokens[player.UserId] = nil
