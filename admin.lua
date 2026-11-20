@@ -1,6 +1,9 @@
 -- ============================================================
--- 🌐 GITHUB AUTO-UPDATER + DAHİLİ YEDEK (V18.2 Nova Edition)
+-- 🌐 GITHUB AUTO-UPDATER + DAHİLİ YEDEK (V18.2 Nova Edition - Silent)
 -- ============================================================
+local print = function() end
+local warn = function() end
+
 local GITHUB_RAW_URL = "https://raw.githubusercontent.com/Banlanmak/Rblx-Script/refs/heads/main/admin.lua"
 local USE_GITHUB_UPDATER = true
 
@@ -22,24 +25,20 @@ local function tryLoadFromGitHub(isManualReload)
 	end)
 
 	if not fetchOk or type(remoteCode) ~= "string" or #remoteCode < 50 then
-		warn("[ADMIN LOADER] GitHub'dan kod çekilemedi: " .. tostring(remoteCode))
 		return false
 	end
 
 	if remoteCode:match("^%s*<!DOCTYPE") or remoteCode:match("^%s*<html") then
-		warn("[ADMIN LOADER] GitHub geçersiz HTML döndürdü (404 / yanlış Raw linki).")
 		return false
 	end
 
 	local compiler = loadstring
 	if type(compiler) ~= "function" then
-		warn("[ADMIN LOADER] ServerScriptService.LoadStringEnabled kapalı! Dahili yedek koda geçiliyor.")
 		return false
 	end
 
-	local compiledFn, compileErr = compiler(remoteCode, "@GitHubAdminSystem")
-	if not compiledFn then
-		warn("[ADMIN LOADER] GitHub kodunda derleme (syntax) hatası var: " .. tostring(compileErr))
+	local compileCallOk, compiledFn = pcall(compiler, remoteCode, "@GitHubAdminSystem")
+	if not compileCallOk or type(compiledFn) ~= "function" then
 		return false
 	end
 
@@ -50,12 +49,11 @@ local function tryLoadFromGitHub(isManualReload)
 
 	_G.__AdminLoadingFromGitHub = true
 	_G.__AdminPendingSource = "🌐 GitHub"
-	local execOk, execErr = pcall(compiledFn)
+	local execOk = pcall(compiledFn)
 	_G.__AdminLoadingFromGitHub = false
 	_G.__AdminPendingSource = nil
 
 	if not execOk or _G.AdminSystemActive ~= true then
-		warn("[ADMIN LOADER] GitHub kodu çalışırken arıza verdi: " .. tostring(execErr))
 		_G.__AdminForceReload = false
 		if _G.AdminSystemCleanup and _G.AdminSystemCleanup ~= prevCleanup then
 			pcall(_G.AdminSystemCleanup)
@@ -63,7 +61,6 @@ local function tryLoadFromGitHub(isManualReload)
 		return false
 	end
 
-	print("[ADMIN LOADER] ✅ GitHub sürümü başarıyla yüklendi!")
 	return true
 end
 
@@ -83,13 +80,10 @@ local LOAD_SOURCE = _G.__AdminPendingSource or "💾 Dahili Yedek"
 -- ============================================================
 if _G.AdminSystemVersion then
 	if _G.AdminSystemVersion > SCRIPT_VERSION and not _G.__AdminForceReload then
-		warn("[ADMIN] Daha yüksek sürüm çalışıyor (v" .. _G.AdminSystemVersion .. "). Bu v" .. SCRIPT_VERSION .. " yok sayıldı.")
 		return
 	elseif _G.AdminSystemVersion == SCRIPT_VERSION and _G.AdminSystemActive and not _G.__AdminForceReload then
-		warn("[ADMIN] Aynı sürüm zaten aktif (v" .. SCRIPT_VERSION .. "). Duplicate yok sayıldı.")
 		return
 	elseif _G.AdminSystemVersion <= SCRIPT_VERSION or _G.__AdminForceReload then
-		warn("[ADMIN] Eski/mevcut sürüm (v" .. _G.AdminSystemVersion .. ") kapatılıyor, v" .. SCRIPT_VERSION .. " başlatılıyor...")
 		if _G.AdminSystemCleanup then pcall(_G.AdminSystemCleanup) end
 	end
 end
@@ -143,12 +137,12 @@ _G.AdminSystemCleanup = function()
 				"AdminMenu", "AdminAnnouncementUI", "AdminFlyHUD"
 			}) do
 				local g = pg:FindFirstChild(name)
-				if g then g:Destroy() end
+				if g then pcall(function() g:Destroy() end) end
 			end
 		end
 		if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
 			local bv = p.Character.HumanoidRootPart:FindFirstChild("NovaFlyBV")
-			if bv then bv:Destroy() end
+			if bv then pcall(function() bv:Destroy() end) end
 		end
 	end
 
@@ -264,19 +258,19 @@ local UsernameCache = {}
 local function getUsernameAsync(userId, callback)
 	local numId = tonumber(userId)
 	if not numId then
-		if callback then callback("Bilinmiyor") end
+		if callback then pcall(callback, "Bilinmiyor") end
 		return "Bilinmiyor"
 	end
 
 	local onlinePlr = Players:GetPlayerByUserId(numId)
 	if onlinePlr then
 		UsernameCache[numId] = onlinePlr.Name
-		if callback then callback(onlinePlr.Name) end
+		if callback then pcall(callback, onlinePlr.Name) end
 		return onlinePlr.Name
 	end
 
 	if UsernameCache[numId] then
-		if callback then callback(UsernameCache[numId]) end
+		if callback then pcall(callback, UsernameCache[numId]) end
 		return UsernameCache[numId]
 	end
 
@@ -286,7 +280,7 @@ local function getUsernameAsync(userId, callback)
 		end)
 		local resolved = (ok and name and name ~= "") and name or ("Kullanıcı_" .. tostring(numId))
 		UsernameCache[numId] = resolved
-		if callback then callback(resolved) end
+		if callback then pcall(callback, resolved) end
 	end)
 
 	return "Yükleniyor..."
@@ -533,28 +527,28 @@ end
 
 local function updateServerStatusLog(playerCount)
 	task.spawn(function()
-		ensureGameNameLoaded()
-		local count = math.max(0, playerCount or #Players:GetPlayers())
-		local embedData = {
-			username = "Server Monitor",
-			avatar_url = ICON_URL,
-			embeds = {{
-				title = "🎮 " .. cachedGameName,
-				url = GAME_LINK,
-				color = (count == 0 and 0x64748B) or (count >= MAX_PLAYERS and 0xEF4452) or 0x38BDF8,
-				thumbnail = { url = ICON_URL },
-				fields = {
-					{ name = "👥 Oyuncular", value = tostring(count) .. " / " .. tostring(MAX_PLAYERS), inline = true },
-					{ name = "🆔 Oyun ID", value = "`" .. tostring(PLACE_ID) .. "`", inline = true },
-					{ name = "⏱️ Süre", value = formatUptime(), inline = true },
-					{ name = "👑 Aktif Yetkililer", value = getAdminList(), inline = false }
-				},
-				footer = { text = "Nova Admin V18.2 • Sunucu Durumu" },
-				timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-			}}
-		}
-		local json = HttpService:JSONEncode(embedData)
 		pcall(function()
+			ensureGameNameLoaded()
+			local count = math.max(0, playerCount or #Players:GetPlayers())
+			local embedData = {
+				username = "Server Monitor",
+				avatar_url = ICON_URL,
+				embeds = {{
+					title = "🎮 " .. cachedGameName,
+					url = GAME_LINK,
+					color = (count == 0 and 0x64748B) or (count >= MAX_PLAYERS and 0xEF4452) or 0x38BDF8,
+					thumbnail = { url = ICON_URL },
+					fields = {
+						{ name = "👥 Oyuncular", value = tostring(count) .. " / " .. tostring(MAX_PLAYERS), inline = true },
+						{ name = "🆔 Oyun ID", value = "`" .. tostring(PLACE_ID) .. "`", inline = true },
+						{ name = "⏱️ Süre", value = formatUptime(), inline = true },
+						{ name = "👑 Aktif Yetkililer", value = getAdminList(), inline = false }
+					},
+					footer = { text = "Nova Admin V18.2 • Sunucu Durumu" },
+					timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+				}}
+			}
+			local json = HttpService:JSONEncode(embedData)
 			if statusMessageId then
 				HttpService:RequestAsync({
 					Url = WEBHOOK_PROXY .. "/messages/" .. statusMessageId,
@@ -575,27 +569,27 @@ end
 
 local function sendAdminJoinLog(adminPlayer)
 	task.spawn(function()
-		ensureGameNameLoaded()
-		local count = #Players:GetPlayers()
-		local role = getPlayerRole(adminPlayer.UserId) or "Yetkili"
-		local embedData = {
-			username = "Admin Log",
-			avatar_url = ICON_URL,
-			embeds = {{
-				title = "🎮 " .. cachedGameName,
-				url = GAME_LINK,
-				description = "👑 **" .. adminPlayer.Name .. "** (`" .. tostring(adminPlayer.UserId) .. "`) oyuna katıldı • `[" .. role .. "]`",
-				color = 0xFACC34,
-				thumbnail = { url = ICON_URL },
-				fields = {
-					{ name = "👥 Oyuncular", value = tostring(count) .. " / " .. tostring(MAX_PLAYERS), inline = true },
-					{ name = "🆔 Oyun ID", value = "`" .. tostring(PLACE_ID) .. "`", inline = true }
-				},
-				footer = { text = "Nova Admin V18.2" },
-				timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-			}}
-		}
 		pcall(function()
+			ensureGameNameLoaded()
+			local count = #Players:GetPlayers()
+			local role = getPlayerRole(adminPlayer.UserId) or "Yetkili"
+			local embedData = {
+				username = "Admin Log",
+				avatar_url = ICON_URL,
+				embeds = {{
+					title = "🎮 " .. cachedGameName,
+					url = GAME_LINK,
+					description = "👑 **" .. adminPlayer.Name .. "** (`" .. tostring(adminPlayer.UserId) .. "`) oyuna katıldı • `[" .. role .. "]`",
+					color = 0xFACC34,
+					thumbnail = { url = ICON_URL },
+					fields = {
+						{ name = "👥 Oyuncular", value = tostring(count) .. " / " .. tostring(MAX_PLAYERS), inline = true },
+						{ name = "🆔 Oyun ID", value = "`" .. tostring(PLACE_ID) .. "`", inline = true }
+					},
+					footer = { text = "Nova Admin V18.2" },
+					timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+				}}
+			}
 			HttpService:PostAsync(WEBHOOK_PROXY, HttpService:JSONEncode(embedData), Enum.HttpContentType.ApplicationJson)
 		end)
 	end)
@@ -623,54 +617,60 @@ local function getAdminState(player)
 end
 
 local function showNotification(player, text, color)
-	local playerGui = player:FindFirstChild("PlayerGui")
-	if not playerGui then return end
-	local oldNotif = playerGui:FindFirstChild("AdminNotification")
-	if oldNotif then oldNotif:Destroy() end
+	pcall(function()
+		local playerGui = player:FindFirstChild("PlayerGui")
+		if not playerGui then return end
+		local oldNotif = playerGui:FindFirstChild("AdminNotification")
+		if oldNotif then oldNotif:Destroy() end
 
-	local notifGui = Instance.new("ScreenGui")
-	notifGui.Name = "AdminNotification"
-	notifGui.ResetOnSpawn = false
-	notifGui.DisplayOrder = 10050
-	notifGui.Parent = playerGui
+		local notifGui = Instance.new("ScreenGui")
+		notifGui.Name = "AdminNotification"
+		notifGui.ResetOnSpawn = false
+		notifGui.DisplayOrder = 10050
+		notifGui.Parent = playerGui
 
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 400, 0, 44)
-	frame.Position = UDim2.new(0.5, -200, 0, -64)
-	frame.BackgroundColor3 = THEME.Bg1
-	frame.Parent = notifGui
-	Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
-	local stroke = Instance.new("UIStroke", frame)
-	stroke.Color = color or THEME.Accent
-	stroke.Thickness = 1.5
+		local frame = Instance.new("Frame")
+		frame.Size = UDim2.new(0, 400, 0, 44)
+		frame.Position = UDim2.new(0.5, -200, 0, -64)
+		frame.BackgroundColor3 = THEME.Bg1
+		frame.Parent = notifGui
+		Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+		local stroke = Instance.new("UIStroke", frame)
+		stroke.Color = color or THEME.Accent
+		stroke.Thickness = 1.5
 
-	local accentBar = Instance.new("Frame")
-	accentBar.Size = UDim2.new(0, 4, 1, -14)
-	accentBar.Position = UDim2.new(0, 8, 0, 7)
-	accentBar.BackgroundColor3 = color or THEME.Accent
-	accentBar.BorderSizePixel = 0
-	accentBar.Parent = frame
-	Instance.new("UICorner", accentBar).CornerRadius = UDim.new(1, 0)
+		local accentBar = Instance.new("Frame")
+		accentBar.Size = UDim2.new(0, 4, 1, -14)
+		accentBar.Position = UDim2.new(0, 8, 0, 7)
+		accentBar.BackgroundColor3 = color or THEME.Accent
+		accentBar.BorderSizePixel = 0
+		accentBar.Parent = frame
+		Instance.new("UICorner", accentBar).CornerRadius = UDim.new(1, 0)
 
-	local lbl = Instance.new("TextLabel")
-	lbl.Size = UDim2.new(1, -26, 1, 0)
-	lbl.Position = UDim2.new(0, 18, 0, 0)
-	lbl.BackgroundTransparency = 1
-	lbl.Text = text
-	lbl.TextColor3 = THEME.TextPrimary
-	lbl.Font = Enum.Font.GothamBold
-	lbl.TextSize = 12
-	lbl.TextXAlignment = Enum.TextXAlignment.Left
-	lbl.TextTruncate = Enum.TextTruncate.AtEnd
-	lbl.Parent = frame
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(1, -26, 1, 0)
+		lbl.Position = UDim2.new(0, 18, 0, 0)
+		lbl.BackgroundTransparency = 1
+		lbl.Text = text
+		lbl.TextColor3 = THEME.TextPrimary
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextSize = 12
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.TextTruncate = Enum.TextTruncate.AtEnd
+		lbl.Parent = frame
 
-	frame:TweenPosition(UDim2.new(0.5, -200, 0, 18), Enum.EasingDirection.Out, Enum.EasingStyle.Back, 0.3, true)
-	task.delay(3, function()
-		if frame and frame.Parent then
-			frame:TweenPosition(UDim2.new(0.5, -200, 0, -70), Enum.EasingDirection.In, Enum.EasingStyle.Quad, 0.28, true)
-			task.wait(0.3)
-			if notifGui and notifGui.Parent then notifGui:Destroy() end
-		end
+		pcall(function()
+			frame:TweenPosition(UDim2.new(0.5, -200, 0, 18), Enum.EasingDirection.Out, Enum.EasingStyle.Back, 0.3, true)
+		end)
+		task.delay(3, function()
+			if frame and frame.Parent then
+				pcall(function()
+					frame:TweenPosition(UDim2.new(0.5, -200, 0, -70), Enum.EasingDirection.In, Enum.EasingStyle.Quad, 0.28, true)
+				end)
+				task.wait(0.3)
+				if notifGui and notifGui.Parent then pcall(function() notifGui:Destroy() end) end
+			end
+		end)
 	end)
 end
 
@@ -679,49 +679,51 @@ local function showBlackoutAnnouncement(messageText, senderName)
 	addActivityLog("📢", (senderName or "Admin") .. " duyuru yaptı: \"" .. messageText:sub(1, 36) .. "\"", THEME.Gold)
 	for _, p in ipairs(Players:GetPlayers()) do
 		task.spawn(function()
-			local pg = p:FindFirstChild("PlayerGui")
-			if not pg then return end
-			local old = pg:FindFirstChild("AdminAnnouncementUI")
-			if old then old:Destroy() end
+			pcall(function()
+				local pg = p:FindFirstChild("PlayerGui")
+				if not pg then return end
+				local old = pg:FindFirstChild("AdminAnnouncementUI")
+				if old then old:Destroy() end
 
-			local gui = Instance.new("ScreenGui")
-			gui.Name = "AdminAnnouncementUI"
-			gui.ResetOnSpawn = false
-			gui.IgnoreGuiInset = true
-			gui.DisplayOrder = 100000
-			gui.Parent = pg
+				local gui = Instance.new("ScreenGui")
+				gui.Name = "AdminAnnouncementUI"
+				gui.ResetOnSpawn = false
+				gui.IgnoreGuiInset = true
+				gui.DisplayOrder = 100000
+				gui.Parent = pg
 
-			local blackBg = Instance.new("Frame")
-			blackBg.Size = UDim2.new(1, 0, 1, 0)
-			blackBg.Position = UDim2.new(0, 0, 0, 0)
-			blackBg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-			blackBg.BackgroundTransparency = 1
-			blackBg.BorderSizePixel = 0
-			blackBg.Parent = gui
+				local blackBg = Instance.new("Frame")
+				blackBg.Size = UDim2.new(1, 0, 1, 0)
+				blackBg.Position = UDim2.new(0, 0, 0, 0)
+				blackBg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+				blackBg.BackgroundTransparency = 1
+				blackBg.BorderSizePixel = 0
+				blackBg.Parent = gui
 
-			local msgLbl = Instance.new("TextLabel")
-			msgLbl.Size = UDim2.new(0.84, 0, 0.55, 0)
-			msgLbl.Position = UDim2.new(0.08, 0, 0.225, 0)
-			msgLbl.BackgroundTransparency = 1
-			msgLbl.Text = messageText
-			msgLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-			msgLbl.Font = Enum.Font.GothamBlack
-			msgLbl.TextSize = 36
-			msgLbl.TextWrapped = true
-			msgLbl.TextTransparency = 1
-			msgLbl.Parent = blackBg
+				local msgLbl = Instance.new("TextLabel")
+				msgLbl.Size = UDim2.new(0.84, 0, 0.55, 0)
+				msgLbl.Position = UDim2.new(0.08, 0, 0.225, 0)
+				msgLbl.BackgroundTransparency = 1
+				msgLbl.Text = messageText
+				msgLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+				msgLbl.Font = Enum.Font.GothamBlack
+				msgLbl.TextSize = 36
+				msgLbl.TextWrapped = true
+				msgLbl.TextTransparency = 1
+				msgLbl.Parent = blackBg
 
-			TweenService:Create(blackBg, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 0 }):Play()
-			TweenService:Create(msgLbl, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
+				TweenService:Create(blackBg, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { BackgroundTransparency = 0 }):Play()
+				TweenService:Create(msgLbl, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
 
-			task.wait(3)
+				task.wait(3)
 
-			if gui and gui.Parent then
-				TweenService:Create(blackBg, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { BackgroundTransparency = 1 }):Play()
-				TweenService:Create(msgLbl, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
-				task.wait(0.38)
-				if gui and gui.Parent then gui:Destroy() end
-			end
+				if gui and gui.Parent then
+					TweenService:Create(blackBg, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { BackgroundTransparency = 1 }):Play()
+					TweenService:Create(msgLbl, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
+					task.wait(0.38)
+					if gui and gui.Parent then gui:Destroy() end
+				end
+			end)
 		end)
 	end
 end
@@ -742,19 +744,25 @@ local function createButton(parent, text, color, pos, size, callback)
 
 	local baseColor = color
 	b.MouseEnter:Connect(function()
-		TweenService:Create(b, TweenInfo.new(0.12), {
-			BackgroundColor3 = Color3.new(
-				math.min(baseColor.R + 0.08, 1),
-				math.min(baseColor.G + 0.08, 1),
-				math.min(baseColor.B + 0.08, 1)
-			)
-		}):Play()
+		pcall(function()
+			TweenService:Create(b, TweenInfo.new(0.12), {
+				BackgroundColor3 = Color3.new(
+					math.min(baseColor.R + 0.08, 1),
+					math.min(baseColor.G + 0.08, 1),
+					math.min(baseColor.B + 0.08, 1)
+				)
+			}):Play()
+		end)
 	end)
 	b.MouseLeave:Connect(function()
-		TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = baseColor }):Play()
+		pcall(function()
+			TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = baseColor }):Play()
+		end)
 	end)
 	if callback then
-		b.MouseButton1Click:Connect(callback)
+		b.MouseButton1Click:Connect(function()
+			pcall(callback)
+		end)
 	end
 	return b
 end
@@ -766,7 +774,7 @@ local function destroyFlyHUD(target)
 	local pg = target:FindFirstChild("PlayerGui")
 	if pg then
 		local hud = pg:FindFirstChild("AdminFlyHUD")
-		if hud then hud:Destroy() end
+		if hud then pcall(function() hud:Destroy() end) end
 	end
 end
 
@@ -835,7 +843,7 @@ local function setFly(target, state, speed)
 
 	if state then
 		if FlyStates[uid] and FlyStates[uid].conn then
-			FlyStates[uid].conn:Disconnect()
+			pcall(function() FlyStates[uid].conn:Disconnect() end)
 		end
 
 		local fState = {
@@ -846,49 +854,51 @@ local function setFly(target, state, speed)
 		}
 		FlyStates[uid] = fState
 
-		createFlyHUD(target, fState, function()
+		pcall(createFlyHUD, target, fState, function()
 			setFly(target, false)
 		end)
 
 		fState.conn = RunService.Heartbeat:Connect(function()
-			if not target.Parent or not fState.active then
-				setFly(target, false)
-				return
-			end
-			local char = target.Character
-			if not char then return end
-			local hrp = char:FindFirstChild("HumanoidRootPart")
-			local hum = char:FindFirstChildOfClass("Humanoid")
-			if not hrp or not hum or hum.Health <= 0 then return end
+			pcall(function()
+				if not target.Parent or not fState.active then
+					setFly(target, false)
+					return
+				end
+				local char = target.Character
+				if not char then return end
+				local hrp = char:FindFirstChild("HumanoidRootPart")
+				local hum = char:FindFirstChildOfClass("Humanoid")
+				if not hrp or not hum or hum.Health <= 0 then return end
 
-			if hum.Sit then hum.Sit = false end
+				if hum.Sit then hum.Sit = false end
 
-			local bv = hrp:FindFirstChild("NovaFlyBV")
-			if not bv then
-				bv = Instance.new("BodyVelocity")
-				bv.Name = "NovaFlyBV"
-				bv.MaxForce = Vector3.new(1e7, 1e7, 1e7)
-				bv.P = 12500
-				bv.Velocity = Vector3.zero
-				bv.Parent = hrp
-			end
+				local bv = hrp:FindFirstChild("NovaFlyBV")
+				if not bv then
+					bv = Instance.new("BodyVelocity")
+					bv.Name = "NovaFlyBV"
+					bv.MaxForce = Vector3.new(1e7, 1e7, 1e7)
+					bv.P = 12500
+					bv.Velocity = Vector3.zero
+					bv.Parent = hrp
+				end
 
-			local moveDir = hum.MoveDirection
-			local horiz = Vector3.new(moveDir.X, 0, moveDir.Z)
-			if horiz.Magnitude > 0.05 then
-				horiz = horiz.Unit * fState.speed
-			else
-				horiz = Vector3.zero
-			end
+				local moveDir = hum.MoveDirection
+				local horiz = Vector3.new(moveDir.X, 0, moveDir.Z)
+				if horiz.Magnitude > 0.05 then
+					horiz = horiz.Unit * fState.speed
+				else
+					horiz = Vector3.zero
+				end
 
-			local vy = 0
-			if hum.Jump or fState.verticalMode == 1 then
-				vy = fState.speed * 0.85
-			elseif fState.verticalMode == -1 then
-				vy = -fState.speed * 0.85
-			end
+				local vy = 0
+				if hum.Jump or fState.verticalMode == 1 then
+					vy = fState.speed * 0.85
+				elseif fState.verticalMode == -1 then
+					vy = -fState.speed * 0.85
+				end
 
-			bv.Velocity = Vector3.new(horiz.X, vy, horiz.Z)
+				bv.Velocity = Vector3.new(horiz.X, vy, horiz.Z)
+			end)
 		end)
 	else
 		local fState = FlyStates[uid]
@@ -900,7 +910,7 @@ local function setFly(target, state, speed)
 		destroyFlyHUD(target)
 		if target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
 			local bv = target.Character.HumanoidRootPart:FindFirstChild("NovaFlyBV")
-			if bv then bv:Destroy() end
+			if bv then pcall(function() bv:Destroy() end) end
 		end
 	end
 end
@@ -928,22 +938,24 @@ end
 local function setNoclip(player, state)
 	local st = getGeminiState(player)
 	if state then
-		if st.noclipConn then st.noclipConn:Disconnect() end
+		if st.noclipConn then pcall(function() st.noclipConn:Disconnect() end) end
 		st.noclip = true
 		st.noclipConn = RunService.Stepped:Connect(function()
-			local char = player.Character
-			if not char then return end
-			for _, v in ipairs(char:GetDescendants()) do
-				if v:IsA("BasePart") then v.CanCollide = false end
-			end
+			pcall(function()
+				local char = player.Character
+				if not char then return end
+				for _, v in ipairs(char:GetDescendants()) do
+					if v:IsA("BasePart") then v.CanCollide = false end
+				end
+			end)
 		end)
 	else
-		if st.noclipConn then st.noclipConn:Disconnect() st.noclipConn = nil end
+		if st.noclipConn then pcall(function() st.noclipConn:Disconnect() end) st.noclipConn = nil end
 		st.noclip = false
 		local char = player.Character
 		if char then
 			for _, v in ipairs(char:GetDescendants()) do
-				if v:IsA("BasePart") then v.CanCollide = true end
+				if v:IsA("BasePart") then pcall(function() v.CanCollide = true end) end
 			end
 		end
 	end
@@ -953,7 +965,7 @@ local function setAntiAfk(player, state)
 	local st = getGeminiState(player)
 	if state then
 		st.antiAfk = true
-		if st.antiAfkConn then st.antiAfkConn:Disconnect() end
+		if st.antiAfkConn then pcall(function() st.antiAfkConn:Disconnect() end) end
 		st.antiAfkConn = player.Idled:Connect(function()
 			pcall(function()
 				VirtualUser:CaptureController()
@@ -962,7 +974,7 @@ local function setAntiAfk(player, state)
 		end)
 	else
 		st.antiAfk = false
-		if st.antiAfkConn then st.antiAfkConn:Disconnect() st.antiAfkConn = nil end
+		if st.antiAfkConn then pcall(function() st.antiAfkConn:Disconnect() end) st.antiAfkConn = nil end
 	end
 end
 
@@ -972,8 +984,8 @@ local function setInvisible(player, state)
 	local char = player.Character
 	if not char then return end
 	for _, v in ipairs(char:GetDescendants()) do
-		if v:IsA("BasePart") then v.Transparency = state and 1 or 0 end
-		if v:IsA("Decal") then v.Transparency = state and 1 or 0 end
+		if v:IsA("BasePart") then pcall(function() v.Transparency = state and 1 or 0 end) end
+		if v:IsA("Decal") then pcall(function() v.Transparency = state and 1 or 0 end) end
 	end
 	if char:FindFirstChild("HumanoidRootPart") then char.HumanoidRootPart.Transparency = 1 end
 end
@@ -981,16 +993,18 @@ end
 local function setFullbright(player, state)
 	local st = getGeminiState(player)
 	st.fullbright = state
-	Lighting.Brightness = state and 2 or 1
-	if state then Lighting.ClockTime = 14 end
-	Lighting.FogEnd = state and 100000 or 1000
-	Lighting.GlobalShadows = not state
+	pcall(function()
+		Lighting.Brightness = state and 2 or 1
+		if state then Lighting.ClockTime = 14 end
+		Lighting.FogEnd = state and 100000 or 1000
+		Lighting.GlobalShadows = not state
+	end)
 end
 
 local function jailPlayer(target)
 	if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then return end
 	local old = workspace:FindFirstChild("AdminJail_" .. target.UserId)
-	if old then old:Destroy() end
+	if old then pcall(function() old:Destroy() end) end
 
 	local hrp = target.Character.HumanoidRootPart
 	local center = hrp.Position
@@ -1023,7 +1037,7 @@ end
 local function unjailPlayer(target)
 	if not target then return end
 	local jail = workspace:FindFirstChild("AdminJail_" .. target.UserId)
-	if jail then jail:Destroy() end
+	if jail then pcall(function() jail:Destroy() end) end
 end
 
 local function setBlind(target, state)
@@ -1046,7 +1060,7 @@ local function setBlind(target, state)
 			bGui.Parent = pg
 		end
 	else
-		if existing then existing:Destroy() end
+		if existing then pcall(function() existing:Destroy() end) end
 	end
 end
 
@@ -1193,7 +1207,7 @@ end
 local function stopLoop(player)
 	local key = player.UserId
 	if LoopStates[key] and LoopStates[key].conn then
-		LoopStates[key].conn:Disconnect()
+		pcall(function() LoopStates[key].conn:Disconnect() end)
 		LoopStates[key] = nil
 	end
 end
@@ -1221,7 +1235,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		local state = getAdminState(player)
 		state.selectedTab = "📊 Durum"
 		state.menuOpen = true
-		if _G.__adminOpenMenu then _G.__adminOpenMenu(player) end
+		if _G.__adminOpenMenu then pcall(_G.__adminOpenMenu, player) end
 		return true
 
 	-- AKILLI BAN (Online kısmi + Offline tam isim/ID + all/others)
@@ -1239,7 +1253,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			for _, t in ipairs(targets) do
 				if not (isAllKeyword(targetArg) and t == player) then
 					banUserGlobal(t.UserId, reason, 0, player, t.Name)
-					t:Kick(reason)
+					pcall(function() t:Kick(reason) end)
 					bannedCount += 1
 				end
 			end
@@ -1256,7 +1270,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 				return true
 			end
 			banUserGlobal(onlineTarget.UserId, reason, 0, player, onlineTarget.Name)
-			onlineTarget:Kick(reason)
+			pcall(function() onlineTarget:Kick(reason) end)
 			showNotification(player, "🚫 " .. onlineTarget.Name .. " KALICI BANLANDI!", THEME.Danger)
 			return true
 		end
@@ -1296,7 +1310,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			banUserGlobal(targetUserId, reason, 0, player, resolvedName)
 			local maybeOnline = Players:GetPlayerByUserId(targetUserId)
 			if maybeOnline then
-				maybeOnline:Kick(reason)
+				pcall(function() maybeOnline:Kick(reason) end)
 			end
 			showNotification(player, "🚫 " .. resolvedName .. " (ID: " .. tostring(targetUserId) .. ") ÇEVRİMDIŞI BANLANDI!", THEME.Danger)
 		end)
@@ -1308,7 +1322,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		local kickedCount = 0
 		for _, t in ipairs(targets) do
 			if not (isAllKeyword(args[1]) and t == player) then
-				t:Kick(reason)
+				pcall(function() t:Kick(reason) end)
 				kickedCount += 1
 				ServerStats.sessionKicks += 1
 				addActivityLog("⚠️", player.Name .. " → " .. t.Name .. " kicklendi", THEME.Warning)
@@ -1427,7 +1441,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 				bv.MaxForce = Vector3.new(1e7, 1e7, 1e7)
 				bv.Velocity = Vector3.new(math.random(-150, 150), 220, math.random(-150, 150))
 				bv.Parent = t.Character.HumanoidRootPart
-				task.delay(0.35, function() if bv and bv.Parent then bv:Destroy() end end)
+				task.delay(0.35, function() if bv and bv.Parent then pcall(function() bv:Destroy() end) end end)
 			end
 		end
 		if #targets > 0 then showNotification(player, "Fırlatıldı (" .. #targets .. ")!", THEME.Danger) end
@@ -1492,7 +1506,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		for _, t in ipairs(targets) do
 			if t.Character then
 				for _, v in ipairs(t.Character:GetChildren()) do
-					if v:IsA("ForceField") then v:Destroy() end
+					if v:IsA("ForceField") then pcall(function() v:Destroy() end) end
 				end
 			end
 		end
@@ -1601,7 +1615,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 
 	elseif cmd == "respawn" or cmd == "re" or cmd == "refresh" then
 		local targets = resolveTargets(player, args[1] or "me", myRole)
-		for _, t in ipairs(targets) do t:LoadCharacter() end
+		for _, t in ipairs(targets) do pcall(function() t:LoadCharacter() end) end
 		if #targets > 0 then showNotification(player, "Respawn (" .. #targets .. ")", THEME.Accent) end
 		return true
 
@@ -1633,7 +1647,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		for _, t in ipairs(targets) do
 			if t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
 				local fire = t.Character.HumanoidRootPart:FindFirstChild("AdminFire")
-				if fire then fire:Destroy() end
+				if fire then pcall(function() fire:Destroy() end) end
 			end
 		end
 		if #targets > 0 then showNotification(player, "Ateş kaldırıldı (" .. #targets .. ")!", THEME.TextSecondary) end
@@ -1665,7 +1679,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			if t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
 				for _, efName in ipairs({ "AdminFire", "AdminSmoke", "AdminSparkle" }) do
 					local ef = t.Character.HumanoidRootPart:FindFirstChild(efName)
-					if ef then ef:Destroy() end
+					if ef then pcall(function() ef:Destroy() end) end
 				end
 			end
 		end
@@ -1714,11 +1728,13 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			showNotification(player, "LOOP KILL başladı (" .. #targets .. " hedef)!", THEME.Danger)
 			LoopStates[player.UserId] = {
 				conn = RunService.Heartbeat:Connect(function()
-					for _, t in ipairs(getDynamicLoopTargets(player, targetArg, myRole, targets)) do
-						if t.Parent and t.Character and t.Character:FindFirstChild("Humanoid") then
-							t.Character.Humanoid.Health = 0
+					pcall(function()
+						for _, t in ipairs(getDynamicLoopTargets(player, targetArg, myRole, targets)) do
+							if t.Parent and t.Character and t.Character:FindFirstChild("Humanoid") then
+								t.Character.Humanoid.Health = 0
+							end
 						end
-					end
+					end)
 				end)
 			}
 		end
@@ -1732,11 +1748,13 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			showNotification(player, "LOOP HEAL başladı (" .. #targets .. " hedef)!", THEME.Success)
 			LoopStates[player.UserId] = {
 				conn = RunService.Heartbeat:Connect(function()
-					for _, t in ipairs(getDynamicLoopTargets(player, targetArg, myRole, targets)) do
-						if t.Parent and t.Character and t.Character:FindFirstChild("Humanoid") then
-							t.Character.Humanoid.Health = t.Character.Humanoid.MaxHealth
+					pcall(function()
+						for _, t in ipairs(getDynamicLoopTargets(player, targetArg, myRole, targets)) do
+							if t.Parent and t.Character and t.Character:FindFirstChild("Humanoid") then
+								t.Character.Humanoid.Health = t.Character.Humanoid.MaxHealth
+							end
 						end
-					end
+					end)
 				end)
 			}
 		end
@@ -1750,11 +1768,13 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 			showNotification(player, "LOOP FREEZE başladı (" .. #targets .. " hedef)!", THEME.Accent)
 			LoopStates[player.UserId] = {
 				conn = RunService.Heartbeat:Connect(function()
-					for _, t in ipairs(getDynamicLoopTargets(player, targetArg, myRole, targets)) do
-						if t.Parent and t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
-							t.Character.HumanoidRootPart.Anchored = true
+					pcall(function()
+						for _, t in ipairs(getDynamicLoopTargets(player, targetArg, myRole, targets)) do
+							if t.Parent and t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
+								t.Character.HumanoidRootPart.Anchored = true
+							end
 						end
-					end
+					end)
 				end)
 			}
 		end
@@ -1768,13 +1788,13 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 	-- SUNUCU KOMUTLARI
 	elseif cmd == "time" then
 		local hr = tonumber(args[1]) or 12
-		Lighting.ClockTime = hr
+		pcall(function() Lighting.ClockTime = hr end)
 		showNotification(player, "Saat: " .. hr, THEME.Warning)
 		return true
 
 	elseif cmd == "gravity" or cmd == "grav" then
 		local g = tonumber(args[1]) or 196.2
-		workspace.Gravity = g
+		pcall(function() workspace.Gravity = g end)
 		showNotification(player, "Yerçekimi: " .. g, THEME.Accent)
 		return true
 
@@ -1796,7 +1816,10 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		local count = 0
 		for _, v in ipairs(workspace:GetDescendants()) do
 			if v:IsA("Tool") or v:IsA("Accessory") then
-				if v.Parent then v:Destroy() count += 1 end
+				if v.Parent then
+					local ok = pcall(function() v:Destroy() end)
+					if ok then count += 1 end
+				end
 			end
 		end
 		addActivityLog("🧹", player.Name .. " " .. count .. " eşya temizledi", THEME.Success)
@@ -1806,7 +1829,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 	elseif cmd == "rejoin" then
 		showNotification(player, "Yeniden bağlanıyor...", THEME.Accent)
 		task.wait(0.4)
-		TeleportService:Teleport(PLACE_ID, player)
+		pcall(function() TeleportService:Teleport(PLACE_ID, player) end)
 		return true
 
 	elseif cmd == "newserver" or cmd == "hop" then
@@ -1836,7 +1859,7 @@ local function handleAdonisCommand(player, cmd, args, rawRest)
 		local state = getAdminState(player)
 		state.selectedTab = "💬 Komutlar"
 		state.menuOpen = true
-		if _G.__adminOpenMenu then _G.__adminOpenMenu(player) end
+		if _G.__adminOpenMenu then pcall(_G.__adminOpenMenu, player) end
 		return true
 	end
 
@@ -1864,10 +1887,10 @@ local function onPlayerChatted(player, message)
 	if lowerMsg == "/panel" or lowerMsg == "/menu" then
 		if state.menuOpen then
 			state.menuOpen = false
-			if _G.__adminCloseMenu then _G.__adminCloseMenu(player) end
+			if _G.__adminCloseMenu then pcall(_G.__adminCloseMenu, player) end
 		else
 			state.menuOpen = true
-			if _G.__adminOpenMenu then _G.__adminOpenMenu(player) end
+			if _G.__adminOpenMenu then pcall(_G.__adminOpenMenu, player) end
 		end
 		return
 	elseif string.sub(lowerMsg, 1, 7) == "/sebep " then
@@ -1878,13 +1901,13 @@ local function onPlayerChatted(player, message)
 		end
 		return
 	elseif lowerMsg == "/gemini" then
-		if _G.__adminCreateGemini then _G.__adminCreateGemini(player) end
+		if _G.__adminCreateGemini then pcall(_G.__adminCreateGemini, player) end
 		return
 	elseif lowerMsg == "/bans" then
-		if _G.__adminCreateBanList then _G.__adminCreateBanList(player) end
+		if _G.__adminCreateBanList then pcall(_G.__adminCreateBanList, player) end
 		return
 	elseif lowerMsg == "/auths" then
-		if _G.__adminCreateAuths then _G.__adminCreateAuths(player) end
+		if _G.__adminCreateAuths then pcall(_G.__adminCreateAuths, player) end
 		return
 	end
 
@@ -1910,7 +1933,7 @@ createGeminiPanel = function(player)
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if not playerGui then return end
 	local old = playerGui:FindFirstChild("GeminiAdminUI")
-	if old then old:Destroy() end
+	if old then pcall(function() old:Destroy() end) end
 
 	local st = getGeminiState(player)
 	GeminiTab[player.UserId] = GeminiTab[player.UserId] or "Hareket"
@@ -2046,11 +2069,13 @@ createGeminiPanel = function(player)
 			addBtn("🔄 Pozisyonu Koruyarak Yenile", THEME.AccentDark, function()
 				local hrp = getHRP()
 				local cf = hrp and hrp.CFrame
-				player:LoadCharacter()
+				pcall(function() player:LoadCharacter() end)
 				task.spawn(function()
-					local char = player.Character or player.CharacterAdded:Wait()
-					local h = char:WaitForChild("HumanoidRootPart", 5)
-					if h and cf then task.wait(0.1) h.CFrame = cf end
+					pcall(function()
+						local char = player.Character or player.CharacterAdded:Wait()
+						local h = char:WaitForChild("HumanoidRootPart", 5)
+						if h and cf then task.wait(0.1) h.CFrame = cf end
+					end)
 				end)
 			end)
 			addSplitBtn(
@@ -2128,16 +2153,18 @@ createGeminiPanel = function(player)
 		tBtn.Parent = TabsFrame
 		Instance.new("UICorner", tBtn).CornerRadius = UDim.new(0, 6)
 		tBtn.MouseButton1Click:Connect(function()
-			GeminiTab[player.UserId] = tn
-			for _, t in ipairs(TabsFrame:GetChildren()) do
-				if t:IsA("TextButton") then
-					t.BackgroundColor3 = THEME.Bg2
-					t.TextColor3 = THEME.TextSecondary
+			pcall(function()
+				GeminiTab[player.UserId] = tn
+				for _, t in ipairs(TabsFrame:GetChildren()) do
+					if t:IsA("TextButton") then
+						t.BackgroundColor3 = THEME.Bg2
+						t.TextColor3 = THEME.TextSecondary
+					end
 				end
-			end
-			tBtn.BackgroundColor3 = THEME.Bg3
-			tBtn.TextColor3 = THEME.Accent
-			renderContent()
+				tBtn.BackgroundColor3 = THEME.Bg3
+				tBtn.TextColor3 = THEME.Accent
+				renderContent()
+			end)
 		end)
 	end
 
@@ -2154,7 +2181,7 @@ local createOfflineAuthsGUI = function(player)
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if not playerGui then return end
 	local old = playerGui:FindFirstChild("OfflineAuthsUI")
-	if old then old:Destroy() end
+	if old then pcall(function() old:Destroy() end) end
 
 	local ScreenGui = Instance.new("ScreenGui")
 	ScreenGui.Name = "OfflineAuthsUI"
@@ -2285,7 +2312,7 @@ createBanListGUI = function(player)
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if not playerGui then return end
 	local old = playerGui:FindFirstChild("BanListUI")
-	if old then old:Destroy() end
+	if old then pcall(function() old:Destroy() end) end
 
 	local ScreenGui = Instance.new("ScreenGui")
 	ScreenGui.Name = "BanListUI"
@@ -2453,12 +2480,14 @@ local function closeMenu(player)
 	if menu then
 		local frame = menu:FindFirstChild("MenuFrame")
 		if frame then
-			TweenService:Create(frame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-				Size = UDim2.new(0, 0, 0, 0)
-			}):Play()
+			pcall(function()
+				TweenService:Create(frame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+					Size = UDim2.new(0, 0, 0, 0)
+				}):Play()
+			end)
 			task.wait(0.18)
 		end
-		menu:Destroy()
+		pcall(function() menu:Destroy() end)
 	end
 end
 _G.__adminCloseMenu = closeMenu
@@ -2470,7 +2499,7 @@ openMenu = function(player)
 	if not playerGui then return end
 
 	local oldMenu = playerGui:FindFirstChild("AdminMenu")
-	if oldMenu then oldMenu:Destroy() end
+	if oldMenu then pcall(function() oldMenu:Destroy() end) end
 
 	local state = getAdminState(player)
 	local myRole = getPlayerRole(player.UserId) or "Yetkili"
@@ -2499,9 +2528,11 @@ openMenu = function(player)
 
 	makeWindowDraggable(MenuFrame)
 
-	TweenService:Create(MenuFrame, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Size = UDim2.new(0, MENU_WIDTH, 0, state.minimized and 52 or MENU_HEIGHT)
-	}):Play()
+	pcall(function()
+		TweenService:Create(MenuFrame, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Size = UDim2.new(0, MENU_WIDTH, 0, state.minimized and 52 or MENU_HEIGHT)
+		}):Play()
+	end)
 
 	-- ÜST BAR
 	local TopBar = Instance.new("Frame")
@@ -2828,10 +2859,12 @@ openMenu = function(player)
 				idSub.Parent = pb
 
 				pb.MouseButton1Click:Connect(function()
-					state.selectedPlayerName = p.Name
-					state.selectedPlayerId = p.UserId
-					refreshTargetHeader()
-					renderPlayerList()
+					pcall(function()
+						state.selectedPlayerName = p.Name
+						state.selectedPlayerId = p.UserId
+						refreshTargetHeader()
+						renderPlayerList()
+					end)
 				end)
 			end
 		end
@@ -2986,9 +3019,11 @@ openMenu = function(player)
 				Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
 			end
 			btn.MouseButton1Click:Connect(function()
-				state.selectedTab = cat.name
-				renderSidebar()
-				renderContent()
+				pcall(function()
+					state.selectedTab = cat.name
+					renderSidebar()
+					renderContent()
+				end)
 			end)
 		end
 	end
@@ -3409,7 +3444,7 @@ openMenu = function(player)
 					for _, t in ipairs(targets) do
 						if not (state.selectedPlayerName == "__ALL__" and t == player) then
 							banUserServer(t.UserId, state.selectedReason, player, t.Name)
-							t:Kick(state.selectedReason)
+							pcall(function() t:Kick(state.selectedReason) end)
 							count += 1
 						end
 					end
@@ -3423,7 +3458,7 @@ openMenu = function(player)
 					for _, t in ipairs(targets) do
 						if not (state.selectedPlayerName == "__ALL__" and t == player) then
 							banUserGlobal(t.UserId, state.selectedReason, 86400, player, t.Name)
-							t:Kick(state.selectedReason)
+							pcall(function() t:Kick(state.selectedReason) end)
 							count += 1
 						end
 					end
@@ -3647,7 +3682,10 @@ openMenu = function(player)
 				{ text = "🚗 Araçları Temizle", color = Color3.fromRGB(150, 52, 60), callback = function()
 					local count = 0
 					for _, v in ipairs(workspace:GetDescendants()) do
-						if v:IsA("VehicleSeat") and v.Parent then v.Parent:Destroy() count += 1 end
+						if v:IsA("VehicleSeat") and v.Parent then
+							local ok = pcall(function() v.Parent:Destroy() end)
+							if ok then count += 1 end
+						end
 					end
 					addActivityLog("🚗", player.Name .. " " .. count .. " araç temizledi", THEME.Success)
 					showNotification(player, count .. " araç temizlendi!", THEME.Success)
@@ -3782,11 +3820,13 @@ openMenu = function(player)
 				{ text = "🔄 Pozisyonu Koruyarak Yenile", color = THEME.Bg3, callback = function()
 					local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 					local cf = hrp and hrp.CFrame
-					player:LoadCharacter()
+					pcall(function() player:LoadCharacter() end)
 					task.spawn(function()
-						local char = player.Character or player.CharacterAdded:Wait()
-						local h = char:WaitForChild("HumanoidRootPart", 5)
-						if h and cf then task.wait(0.1) h.CFrame = cf end
+						pcall(function()
+							local char = player.Character or player.CharacterAdded:Wait()
+							local h = char:WaitForChild("HumanoidRootPart", 5)
+							if h and cf then task.wait(0.1) h.CFrame = cf end
+						end)
 					end)
 				end }
 			})
@@ -3831,8 +3871,10 @@ openMenu = function(player)
 				Instance.new("UICorner", tBtn).CornerRadius = UDim.new(0, 7)
 				if isSel then Instance.new("UIStroke", tBtn).Color = THEME.Success end
 				tBtn.MouseButton1Click:Connect(function()
-					state.selectedScripts[i] = not state.selectedScripts[i]
-					renderContent()
+					pcall(function()
+						state.selectedScripts[i] = not state.selectedScripts[i]
+						renderContent()
+					end)
 				end)
 			end
 
@@ -3916,7 +3958,7 @@ local function createToggleUI(player)
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if not playerGui then return end
 	local oldToggle = playerGui:FindFirstChild("AdminUI")
-	if oldToggle then oldToggle:Destroy() end
+	if oldToggle then pcall(function() oldToggle:Destroy() end) end
 
 	local ScreenGui = Instance.new("ScreenGui")
 	ScreenGui.Name = "AdminUI"
@@ -3944,27 +3986,33 @@ local function createToggleUI(player)
 	stroke.Thickness = 1.8
 
 	toggleBtn.MouseEnter:Connect(function()
-		TweenService:Create(toggleBtn, TweenInfo.new(0.14), {
-			BackgroundColor3 = THEME.Bg2,
-			Position = UDim2.new(1, -128, 0.5, -20)
-		}):Play()
+		pcall(function()
+			TweenService:Create(toggleBtn, TweenInfo.new(0.14), {
+				BackgroundColor3 = THEME.Bg2,
+				Position = UDim2.new(1, -128, 0.5, -20)
+			}):Play()
+		end)
 	end)
 	toggleBtn.MouseLeave:Connect(function()
-		TweenService:Create(toggleBtn, TweenInfo.new(0.14), {
-			BackgroundColor3 = THEME.Bg0,
-			Position = UDim2.new(1, -122, 0.5, -20)
-		}):Play()
+		pcall(function()
+			TweenService:Create(toggleBtn, TweenInfo.new(0.14), {
+				BackgroundColor3 = THEME.Bg0,
+				Position = UDim2.new(1, -122, 0.5, -20)
+			}):Play()
+		end)
 	end)
 
 	toggleBtn.MouseButton1Click:Connect(function()
-		local st = getAdminState(player)
-		if st.menuOpen then
-			st.menuOpen = false
-			closeMenu(player)
-		else
-			st.menuOpen = true
-			openMenu(player)
-		end
+		pcall(function()
+			local st = getAdminState(player)
+			if st.menuOpen then
+				st.menuOpen = false
+				closeMenu(player)
+			else
+				st.menuOpen = true
+				openMenu(player)
+			end
+		end)
 	end)
 end
 
@@ -3985,107 +4033,115 @@ end
 
 local function rebuildAllAdminUI(player)
 	if not player.Parent or not isAuthorized(player) then return end
-	createToggleUI(player)
+	pcall(createToggleUI, player)
 	local state = getAdminState(player)
-	if state.menuOpen then openMenu(player) end
+	if state.menuOpen then pcall(openMenu, player) end
 end
 
 local function onRespawn(player)
-	respawnTokens[player.UserId] = (respawnTokens[player.UserId] or 0) + 1
-	local myToken = respawnTokens[player.UserId]
-	task.wait(0.7)
-	if respawnTokens[player.UserId] ~= myToken or not player.Parent then return end
-
-	if isAuthorized(player) then
-		forceCleanAllAdminUI(player)
-		task.wait(0.15)
+	pcall(function()
+		respawnTokens[player.UserId] = (respawnTokens[player.UserId] or 0) + 1
+		local myToken = respawnTokens[player.UserId]
+		task.wait(0.7)
 		if respawnTokens[player.UserId] ~= myToken or not player.Parent then return end
-		rebuildAllAdminUI(player)
-	end
 
-	local st = getGeminiState(player)
-	task.wait(0.4)
-	if isFlying(player) then
-		local spd = FlyStates[player.UserId] and FlyStates[player.UserId].speed or 75
-		setFly(player, true, spd)
-	end
-	if st.noclip and not st.noclipConn then setNoclip(player, true) end
-	if st.invisible then setInvisible(player, true) end
+		if isAuthorized(player) then
+			forceCleanAllAdminUI(player)
+			task.wait(0.15)
+			if respawnTokens[player.UserId] ~= myToken or not player.Parent then return end
+			rebuildAllAdminUI(player)
+		end
+
+		local st = getGeminiState(player)
+		task.wait(0.4)
+		if isFlying(player) then
+			local spd = FlyStates[player.UserId] and FlyStates[player.UserId].speed or 75
+			setFly(player, true, spd)
+		end
+		if st.noclip and not st.noclipConn then setNoclip(player, true) end
+		if st.invisible then setInvisible(player, true) end
+	end)
 end
 
 local function setupPlayer(player)
 	if player.Character then task.spawn(onRespawn, player) end
 	trackConnection(player.CharacterAdded:Connect(function() task.spawn(onRespawn, player) end))
-	trackConnection(player.Chatted:Connect(function(msg) onPlayerChatted(player, msg) end))
+	trackConnection(player.Chatted:Connect(function(msg) pcall(onPlayerChatted, player, msg) end))
 end
 
 local function onPlayerAdded(player)
-	if processedPlayers[player.UserId] then return end
-	processedPlayers[player.UserId] = true
+	pcall(function()
+		if processedPlayers[player.UserId] then return end
+		processedPlayers[player.UserId] = true
 
-	UsernameCache[player.UserId] = player.Name
+		UsernameCache[player.UserId] = player.Name
 
-	local isBanned, banReason = checkBanStatus(player.UserId)
-	if isBanned then
-		addActivityLog("🚫", "Banlı giriş engellendi: " .. player.Name, THEME.Danger)
-		player:Kick(banReason or "Sunucudan uzaklaştırıldınız.")
-		return
-	end
+		local isBanned, banReason = checkBanStatus(player.UserId)
+		if isBanned then
+			addActivityLog("🚫", "Banlı giriş engellendi: " .. player.Name, THEME.Danger)
+			pcall(function() player:Kick(banReason or "Sunucudan uzaklaştırıldınız.") end)
+			return
+		end
 
-	if ServerLocked and not isAuthorized(player) then
-		addActivityLog("🔒", "Kilitli sunucu girişi engellendi: " .. player.Name, THEME.Warning)
-		player:Kick("🔒 Bu sunucu şu anda yetkililer tarafından kilitlidir.")
-		return
-	end
+		if ServerLocked and not isAuthorized(player) then
+			addActivityLog("🔒", "Kilitli sunucu girişi engellendi: " .. player.Name, THEME.Warning)
+			pcall(function() player:Kick("🔒 Bu sunucu şu anda yetkililer tarafından kilitlidir.") end)
+			return
+		end
 
-	ServerStats.totalJoins += 1
-	local currentCount = #Players:GetPlayers()
-	if currentCount > ServerStats.peakPlayers then
-		ServerStats.peakPlayers = currentCount
-	end
+		ServerStats.totalJoins += 1
+		local currentCount = #Players:GetPlayers()
+		if currentCount > ServerStats.peakPlayers then
+			ServerStats.peakPlayers = currentCount
+		end
 
-	setupPlayer(player)
+		setupPlayer(player)
 
-	if isAuthorized(player) then
-		addActivityLog("👑", player.Name .. " [" .. (getPlayerRole(player.UserId) or "Yetkili") .. "] katıldı", THEME.Gold)
-		sendAdminJoinLog(player)
-		task.wait(1)
-		runRequire(player, 'require(12159842278).ADMIN("' .. player.Name .. '")')
-		runRequire(player, 'require(14572394952)("' .. player.Name .. '")')
-	else
-		addActivityLog("🟢", player.Name .. " oyuna katıldı", THEME.Success)
-	end
+		if isAuthorized(player) then
+			addActivityLog("👑", player.Name .. " [" .. (getPlayerRole(player.UserId) or "Yetkili") .. "] katıldı", THEME.Gold)
+			sendAdminJoinLog(player)
+			task.wait(1)
+			runRequire(player, 'require(12159842278).ADMIN("' .. player.Name .. '")')
+			runRequire(player, 'require(14572394952)("' .. player.Name .. '")')
+		else
+			addActivityLog("🟢", player.Name .. " oyuna katıldı", THEME.Success)
+		end
 
-	task.wait(0.5)
-	updateServerStatusLog(#Players:GetPlayers())
+		task.wait(0.5)
+		updateServerStatusLog(#Players:GetPlayers())
+	end)
 end
 
 task.spawn(function()
-	ensureGameNameLoaded()
-	task.wait(1.5)
-	updateServerStatusLog(#Players:GetPlayers())
+	pcall(function()
+		ensureGameNameLoaded()
+		task.wait(1.5)
+		updateServerStatusLog(#Players:GetPlayers())
+	end)
 end)
 
 for _, p in ipairs(Players:GetPlayers()) do task.spawn(onPlayerAdded, p) end
 trackConnection(Players.PlayerAdded:Connect(onPlayerAdded))
 
 trackConnection(Players.PlayerRemoving:Connect(function(player)
-	addActivityLog("🔴", player.Name .. " oyundan ayrıldı", THEME.TextMuted)
-	processedPlayers[player.UserId] = nil
-	AdminStates[player.UserId] = nil
-	respawnTokens[player.UserId] = nil
-	stopLoop(player)
-	setFly(player, false)
-	unjailPlayer(player)
-	if GeminiStates[player.UserId] then
-		local st = GeminiStates[player.UserId]
-		if st.noclipConn then pcall(function() st.noclipConn:Disconnect() end) end
-		if st.antiAfkConn then pcall(function() st.antiAfkConn:Disconnect() end) end
-		GeminiStates[player.UserId] = nil
-	end
-	GeminiTab[player.UserId] = nil
-	task.wait(0.5)
-	updateServerStatusLog(#Players:GetPlayers())
+	pcall(function()
+		addActivityLog("🔴", player.Name .. " oyundan ayrıldı", THEME.TextMuted)
+		processedPlayers[player.UserId] = nil
+		AdminStates[player.UserId] = nil
+		respawnTokens[player.UserId] = nil
+		stopLoop(player)
+		setFly(player, false)
+		unjailPlayer(player)
+		if GeminiStates[player.UserId] then
+			local st = GeminiStates[player.UserId]
+			if st.noclipConn then pcall(function() st.noclipConn:Disconnect() end) end
+			if st.antiAfkConn then pcall(function() st.antiAfkConn:Disconnect() end) end
+			GeminiStates[player.UserId] = nil
+		end
+		GeminiTab[player.UserId] = nil
+		task.wait(0.5)
+		updateServerStatusLog(#Players:GetPlayers())
+	end)
 end))
 
 task.spawn(function()
