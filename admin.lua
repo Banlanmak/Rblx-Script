@@ -1,6 +1,8 @@
 -- ============================================================
--- 🌐 GITHUB AUTO-UPDATER + DAHİLİ YEDEK (V18.2 Nova Edition - Silent)
+-- 🌐 Roblox Studio API
 -- ============================================================
+-- This script is made by @grandeveloper
+-- 
 local print = function() end
 local warn = function() end
 
@@ -16,7 +18,7 @@ local function tryLoadFromGitHub(isManualReload)
 		return false
 	end
 
-	-- GitHub CDN önbelleğini aşmak için zaman damgası ekle
+	
 	local sep = GITHUB_RAW_URL:find("?", 1, true) and "&" or "?"
 	local fetchUrl = GITHUB_RAW_URL .. sep .. "t=" .. tostring(os.time())
 
